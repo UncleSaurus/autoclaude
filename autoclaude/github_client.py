@@ -353,6 +353,22 @@ class GitOperations:
         result = self._run_git("status", "--porcelain")
         return bool(result.stdout.strip())
 
+    def has_code_changes(self, base: str = "origin/main") -> bool:
+        """Check if there are meaningful code changes (not just .autoclaude/)."""
+        # Check uncommitted changes first
+        porcelain = self._run_git("status", "--porcelain")
+        for line in porcelain.stdout.strip().splitlines():
+            filepath = line[3:].strip().strip('"')
+            if not filepath.startswith(".autoclaude/"):
+                return True
+        # Check committed but unpushed changes
+        diff_result = self._run_git("diff", "--name-only", f"{base}..HEAD", check=False)
+        if diff_result.returncode == 0:
+            for filepath in diff_result.stdout.strip().splitlines():
+                if not filepath.startswith(".autoclaude/"):
+                    return True
+        return False
+
     def get_commit_count(self, base: str = "origin/main") -> int:
         result = self._run_git("rev-list", "--count", f"{base}..HEAD")
         return int(result.stdout.strip())

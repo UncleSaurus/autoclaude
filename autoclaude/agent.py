@@ -56,7 +56,7 @@ class AgentRunner:
 
 ## Instructions
 
-1. **Understand the requirements**: Read the issue carefully. If file paths are mentioned, read those files first.
+1. **Understand the requirements**: Read the issue carefully — every word matters. If file paths are mentioned, read those files FIRST before making any changes. Understand what the code currently does and what the issue is asking you to change.
 
 2. **Implement the changes**: Make all necessary code changes to fulfill the request. This may involve:
    - Reading existing code to understand the codebase
@@ -64,22 +64,32 @@ class AgentRunner:
    - Modifying existing files
    - Running commands to test your changes
 
-3. **Commit your work**: After making changes, commit with a clear message that references issue #{context.number}.
-   Use: `git add -A && git commit -m "Your message (#{context.number})"`
+3. **Run tests**: After making changes, run the project's test suite. If there's a test command in the project context (AGENTS.md, CLAUDE.md), use it. Fix any test failures before proceeding.
 
-4. **Handle blocking issues**: If you genuinely cannot proceed without human input:
+4. **Verify your work before signaling completion**:
+   - Run `git diff` to review ALL your changes
+   - Re-read the issue requirements and confirm your changes match what was asked
+   - If the issue says "replace X with Y", verify you replaced X with Y (not the reverse)
+   - If the issue says "extract/move code to a new location", verify the code exists in the new location
+   - If you made no meaningful code changes, do NOT signal completion
+
+5. **Do NOT commit**: Do not run `git add` or `git commit`. The orchestrator handles commits after your changes are verified.
+
+6. **Handle blocking issues**: If you genuinely cannot proceed without human input:
    - Output exactly: `AUTOCLAUDE_BLOCKED: <your specific question>`
    - Only do this if you truly cannot make progress
    - Be specific about what information you need
 
-5. **Signal completion**: When you have fully implemented the requested changes:
+7. **Signal completion**: ONLY after verifying your changes match the requirements:
    - Output exactly: `AUTOCLAUDE_COMPLETE`
+   - Never signal completion if you made no code changes
+   - Never signal completion without first reviewing your diff
 
-6. **Share learnings**: If you discover something useful about the codebase:
+8. **Share learnings**: If you discover something useful about the codebase:
    - Output: `LEARNED: <insight>` for each discovery
    - These get saved for future runs
 
-7. **Quality standards**:
+9. **Quality standards**:
    - Follow existing code patterns and style
    - Don't introduce security vulnerabilities
    - Keep changes focused - don't refactor unrelated code
@@ -90,8 +100,8 @@ class AgentRunner:
 - Work autonomously. Make decisions and implement changes without asking for permission.
 - You have full access to read files, write files, edit files, and run bash commands.
 - If tests fail, try to fix them. Only report as blocked if you've tried and can't fix.
-- Commit frequently with meaningful messages.
-- Your commits will be pushed and CI will run automatically.
+- Your changes will be committed, pushed, and CI will run automatically after you finish.
+- CRITICAL: Double-check the direction of your changes. If the issue says "use config function instead of hardcoded value", make sure you're adding the config function call, not removing it.
 
 Begin by reading any referenced files to understand the current state, then implement the requested changes.""")
 

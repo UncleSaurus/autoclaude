@@ -149,32 +149,27 @@ class TicketProcessor:
                 project_context = self._load_project_context()
                 agent_result = await self.agent.run(context, project_context=project_context)
 
-                # Record single-pass progress
-                learnings = extract_learnings(agent_result.output)
-                context_root = self._get_context_root()
-                status = "COMPLETED" if agent_result.success else ("BLOCKED" if agent_result.blocked else "FAILED")
-                append_run(
-                    root=context_root,
-                    issue_number=context.number,
-                    title=context.title,
-                    status=status,
-                    branch=branch.name,
-                    learnings=learnings,
-                )
-
             if agent_result.blocked:
                 return self._handle_blocked(result, context, agent_result.blocking_question)
 
             if agent_result.error:
                 return self._handle_error(result, context, agent_result.error)
 
-            # Step 5: Commit any uncommitted changes
+            # Step 5: Verify real code changes exist (not just .autoclaude/ files)
+            if not self.git.has_code_changes():
+                return self._handle_error(
+                    result, context,
+                    "Agent signaled completion but made no code changes. "
+                    "Only .autoclaude/ files were modified."
+                )
+
+            # Step 6: Commit all changes (agent no longer commits, processor owns this)
             if self.git.has_uncommitted_changes():
                 sha = self.git.commit("Complete implementation", context.number)
                 if sha:
                     result.commits.append(sha)
 
-            # Step 6: Push and wait for CI
+            # Step 7: Push and wait for CI
             print(f"  Pushing branch and waiting for CI...")
             self.git.push_branch(branch.name)
 
@@ -182,13 +177,13 @@ class TicketProcessor:
             if not ci_result:
                 return result
 
-            # Step 7: Create PR
+            # Step 8: Create PR
             print(f"  Creating pull request...")
             pr_number, pr_url = self._create_pr(context, branch.name)
             result.pr_number = pr_number
             result.pr_url = pr_url
 
-            # Update progress with PR info
+            # Record progress AFTER commit and PR (so it doesn't pollute the diff)
             context_root = self._get_context_root()
             append_run(
                 root=context_root,
@@ -199,7 +194,7 @@ class TicketProcessor:
                 pr_url=pr_url,
             )
 
-            # Step 8: Update issue
+            # Step 9: Update issue
             self._mark_completed(context.number, pr_url)
             result.status = ProcessingStatus.COMPLETED
             result.completed_at = datetime.now()
