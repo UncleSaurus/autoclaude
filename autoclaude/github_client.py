@@ -203,20 +203,25 @@ class GitHubClient:
         return (pr.number, pr.html_url)
 
     def get_ci_status(self, branch: str) -> CIStatus:
-        """Get CI status for a branch."""
+        """Get CI status for a branch using Actions workflow runs API.
+
+        Uses /actions/runs (requires Actions:Read) instead of /check-runs
+        (requires Checks:Read) since fine-grained PATs may not expose the
+        Checks permission.
+        """
         try:
             branch_ref = self.repo.get_branch(branch)
             sha = branch_ref.commit.sha
         except Exception:
             return CIStatus(conclusion=None, status="unknown")
 
-        check_runs = list(self.repo.get_commit(sha).get_check_runs())
+        workflow_runs = list(self.repo.get_workflow_runs(head_sha=sha))
 
-        if not check_runs:
+        if not workflow_runs:
             return CIStatus(conclusion="success", status="completed", check_runs=[])
 
-        conclusions = [run.conclusion for run in check_runs if run.conclusion]
-        statuses = [run.status for run in check_runs]
+        conclusions = [run.conclusion for run in workflow_runs if run.conclusion]
+        statuses = [run.status for run in workflow_runs]
 
         if "in_progress" in statuses or "queued" in statuses:
             status = "in_progress"
@@ -234,15 +239,11 @@ class GitHubClient:
         return CIStatus(
             conclusion=conclusion,
             status=status,
-            check_runs=[{
+            workflow_runs=[{
                 "name": run.name,
                 "conclusion": run.conclusion,
                 "status": run.status,
-                "output": {
-                    "title": run.output.title if run.output else None,
-                    "summary": run.output.summary if run.output else None,
-                },
-            } for run in check_runs],
+            } for run in workflow_runs],
         )
 
 
