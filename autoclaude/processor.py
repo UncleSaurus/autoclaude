@@ -12,7 +12,7 @@ from .context import load_context, load_progress_context
 from .github_client import GitHubClient, GitOperations
 from .loop import IterationLoop
 from .models import ClarificationRequest, IssueContext, ProcessingResult, ProcessingStatus
-from .progress import append_run, extract_learnings
+from .progress import append_run, extract_learnings, extract_summary
 
 
 class TicketProcessor:
@@ -125,6 +125,7 @@ class TicketProcessor:
             print(f"  Creating branch for issue #{context.number}...")
             branch = self.git.create_branch(context.number, context.title)
             result.branch_name = branch.name
+            self._current_branch = branch.name
             print(f"  Branch: {branch.name}")
 
             # Step 3: Optionally post plan comment
@@ -163,13 +164,17 @@ class TicketProcessor:
                     "Only .autoclaude/ files were modified."
                 )
 
-            # Step 6: Commit all changes (agent no longer commits, processor owns this)
+            # Step 6: Extract summary from agent output for commit/PR
+            summary = extract_summary(agent_result.output)
+            commit_msg = summary if summary else context.title
+
+            # Step 7: Commit code changes (excludes .autoclaude/ automatically)
             if self.git.has_uncommitted_changes():
-                sha = self.git.commit("Complete implementation", context.number)
+                sha = self.git.commit(commit_msg, context.number)
                 if sha:
                     result.commits.append(sha)
 
-            # Step 7: Push and wait for CI
+            # Step 8: Push and wait for CI
             print(f"  Pushing branch and waiting for CI...")
             self.git.push_branch(branch.name)
 
@@ -177,31 +182,25 @@ class TicketProcessor:
             if not ci_result:
                 return result
 
-            # Step 8: Create PR
+            # Step 9: Create PR with descriptive body
             print(f"  Creating pull request...")
-            pr_number, pr_url = self._create_pr(context, branch.name)
+            pr_number, pr_url = self._create_pr(context, branch.name, summary)
             result.pr_number = pr_number
             result.pr_url = pr_url
 
-            # Record progress AFTER commit and PR (so it doesn't pollute the diff)
-            context_root = self._get_context_root()
-            append_run(
-                root=context_root,
-                issue_number=context.number,
-                title=context.title,
-                status="PR_CREATED",
-                branch=branch.name,
-                pr_url=pr_url,
-            )
-
-            # Step 9: Update issue
+            # Step 10: Update issue and clean up
             self._mark_completed(context.number, pr_url)
             result.status = ProcessingStatus.COMPLETED
             result.completed_at = datetime.now()
 
+            if self.config.use_worktree:
+                self.git.cleanup_worktree(branch.name)
+
             return result
 
         except Exception as e:
+            if self.config.use_worktree and hasattr(self, '_current_branch'):
+                self.git.cleanup_worktree(self._current_branch)
             return self._handle_error(result, context, str(e))
 
     def _mark_analyzing(self, issue_number: int) -> None:
@@ -377,20 +376,18 @@ Please investigate and remove the `{self.config.label_blocked}` label to allow a
 
         return False
 
-    def _create_pr(self, context: IssueContext, branch: str) -> tuple[int, str]:
+    def _create_pr(self, context: IssueContext, branch: str, summary: str = "") -> tuple[int, str]:
         title = f"{context.title} (#{context.number})"
+
+        changes_section = summary if summary else "See commit history for details."
 
         body = f"""## Summary
 
-Automated implementation for #{context.number}.
-
-## Changes
-
-See commit history for details.
+{changes_section}
 
 ## Test Plan
 
-- [ ] CI passes
+- [x] CI passes
 - [ ] Manual review of changes
 
 ---

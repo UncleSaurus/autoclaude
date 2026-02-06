@@ -338,7 +338,9 @@ class GitOperations:
         if f"#{issue_number}" not in message:
             message = f"{message} (#{issue_number})"
 
+        # Stage everything EXCEPT .autoclaude/ (progress tracking, not code)
         self._run_git("add", "-A")
+        self._run_git("reset", "HEAD", "--", ".autoclaude/", check=False)
         result = self._run_git("commit", "-m", message, check=False)
 
         if result.returncode != 0:
@@ -377,3 +379,16 @@ class GitOperations:
         """Get a summary of changes since base for iteration context."""
         result = self._run_git("diff", "--stat", f"{base}..HEAD", check=False)
         return result.stdout.strip() if result.returncode == 0 else ""
+
+    def cleanup_worktree(self, branch_name: str) -> None:
+        """Remove worktree and delete branch after processing."""
+        if not self.worktree_path:
+            return
+        # Must run from the main repo, not the worktree
+        old_worktree = self.worktree_path
+        self.worktree_path = None
+        try:
+            self._run_git("worktree", "remove", old_worktree, "--force", check=False)
+            self._run_git("branch", "-D", branch_name, check=False)
+        except Exception:
+            pass  # Best-effort cleanup

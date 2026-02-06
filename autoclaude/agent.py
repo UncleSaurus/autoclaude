@@ -81,7 +81,8 @@ class AgentRunner:
    - Be specific about what information you need
 
 7. **Signal completion**: ONLY after verifying your changes match the requirements:
-   - Output exactly: `AUTOCLAUDE_COMPLETE`
+   - First output a summary: `AUTOCLAUDE_SUMMARY: <1-2 sentence description of what you changed and why>`
+   - Then output exactly: `AUTOCLAUDE_COMPLETE`
    - Never signal completion if you made no code changes
    - Never signal completion without first reviewing your diff
 

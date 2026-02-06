@@ -89,6 +89,12 @@ def extract_learnings(agent_output: str) -> list[str]:
     return [m.strip() for m in matches if m.strip()]
 
 
+def extract_summary(agent_output: str) -> str:
+    """Extract AUTOCLAUDE_SUMMARY from agent output for commit messages."""
+    match = re.search(r'AUTOCLAUDE_SUMMARY:\s*(.+?)(?:\n|$)', agent_output, re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
 def is_complete(agent_output: str) -> bool:
     """Check if the agent signaled completion."""
     return "AUTOCLAUDE_COMPLETE" in agent_output
