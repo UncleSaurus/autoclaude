@@ -61,6 +61,13 @@ class AutoClaudeConfig:
     # Iteration settings
     max_iterations: int = 1  # 1 = single pass (default), >1 = iterative
 
+    # Quality gate settings
+    quality_checks: list[str] = field(default_factory=list)  # CLI-specified check commands
+    max_quality_retries: int = 2  # Max attempts to fix quality failures
+
+    # Output settings
+    verbose: bool = False  # Stream agent actions to terminal in real-time
+
     def validate(self) -> list[str]:
         """Validate configuration and return list of errors."""
         errors = []

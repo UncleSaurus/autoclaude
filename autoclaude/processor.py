@@ -13,6 +13,7 @@ from .github_client import GitHubClient, GitOperations
 from .loop import IterationLoop
 from .models import ClarificationRequest, IssueContext, ProcessingResult, ProcessingStatus
 from .progress import append_run, extract_learnings, extract_summary
+from .quality import QualityCheck, discover_checks, run_checks
 
 
 class TicketProcessor:
@@ -168,6 +169,14 @@ class TicketProcessor:
             summary = extract_summary(agent_result.output)
             commit_msg = summary if summary else context.title
 
+            # Step 6.5: Quality gate — run checks before committing
+            quality_ok = await self._run_quality_gate(context, agent_result)
+            if not quality_ok:
+                # Quality gate failures were fed back and retried.
+                # Re-extract summary in case the fix agent updated it.
+                summary = extract_summary(agent_result.output) or summary
+                commit_msg = summary if summary else context.title
+
             # Step 7: Commit code changes (excludes .autoclaude/ automatically)
             if self.git.has_uncommitted_changes():
                 sha = self.git.commit(commit_msg, context.number)
@@ -202,6 +211,59 @@ class TicketProcessor:
             if self.config.use_worktree and hasattr(self, '_current_branch'):
                 self.git.cleanup_worktree(self._current_branch)
             return self._handle_error(result, context, str(e))
+
+    def _discover_quality_checks(self) -> list[QualityCheck]:
+        """Discover quality checks from .autoclaude/quality.yaml + CLI flags."""
+        context_root = self._get_context_root()
+        checks = discover_checks(context_root)
+
+        # Add CLI-specified checks
+        for cmd in self.config.quality_checks:
+            checks.append(QualityCheck(name=cmd, command=cmd))
+
+        return checks
+
+    async def _run_quality_gate(self, context: IssueContext, agent_result) -> bool:
+        """Run quality checks and feed failures back to agent for fixing.
+
+        Returns True if all checks pass (or no checks configured).
+        Returns False if checks failed and were (partially) fixed.
+        """
+        checks = self._discover_quality_checks()
+        if not checks:
+            return True
+
+        cwd = self.config.worktree_path or "."
+
+        for attempt in range(1, self.config.max_quality_retries + 1):
+            print(f"  Running quality checks (attempt {attempt}/{self.config.max_quality_retries})...")
+            result = run_checks(checks, cwd=cwd, dry_run=self.config.dry_run)
+
+            if result.passed:
+                print(f"  All quality checks passed!")
+                return True
+
+            failure_text = result.failure_summary()
+            print(f"  Quality checks failed. Feeding back to agent...")
+
+            if attempt >= self.config.max_quality_retries:
+                print(f"  Max quality retries reached. Proceeding with failures.")
+                return False
+
+            # Feed failures back to agent for fixing
+            fix_result = await self.agent.run_fix_quality(
+                context, failure_text,
+            )
+
+            if fix_result.error:
+                print(f"  Quality fix agent error: {fix_result.error}")
+                return False
+
+            if fix_result.blocked:
+                print(f"  Quality fix agent blocked: {fix_result.blocking_question}")
+                return False
+
+        return False
 
     def _mark_analyzing(self, issue_number: int) -> None:
         self.github.add_label(issue_number, self.config.label_analyzing)

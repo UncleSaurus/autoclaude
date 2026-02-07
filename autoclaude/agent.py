@@ -1,6 +1,7 @@
 """Claude Agent SDK integration for autonomous code execution."""
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import Optional
 
@@ -37,6 +38,30 @@ class AgentRunner:
 
     def __init__(self, config: AutoClaudeConfig):
         self.config = config
+
+    def _log_verbose(self, message) -> None:
+        """Print agent message to stderr if verbose mode is on."""
+        if not self.config.verbose:
+            return
+
+        # AssistantMessage — text output and tool calls
+        if hasattr(message, "content") and isinstance(message.content, list):
+            for block in message.content:
+                if hasattr(block, "text"):
+                    print(f"\033[36m[agent]\033[0m {block.text}", file=sys.stderr)
+                elif hasattr(block, "name") and hasattr(block, "input"):
+                    tool_input = block.input
+                    # Truncate large inputs
+                    preview = str(tool_input)
+                    if len(preview) > 200:
+                        preview = preview[:200] + "..."
+                    print(f"\033[33m[tool]\033[0m {block.name}({preview})", file=sys.stderr)
+
+        # ResultMessage — final summary
+        elif hasattr(message, "num_turns") and hasattr(message, "duration_ms"):
+            secs = message.duration_ms / 1000
+            cost = f" ${message.total_cost_usd:.4f}" if message.total_cost_usd else ""
+            print(f"\033[32m[done]\033[0m {message.num_turns} turns, {secs:.1f}s{cost}", file=sys.stderr)
 
     def _build_prompt(self, context: IssueContext, project_context: str = "") -> str:
         """Build the prompt for Claude from issue context.
@@ -132,6 +157,8 @@ Begin by reading any referenced files to understand the current state, then impl
             )
 
             async for message in query(prompt=prompt, options=options):
+                self._log_verbose(message)
+
                 if hasattr(message, "subtype") and message.subtype == "init":
                     session_id = getattr(message, "session_id", None)
 
@@ -277,6 +304,34 @@ Analyze the issue now and provide your assessment.
         except Exception as e:
             return AnalysisResult(ready_to_implement=False, error=str(e))
 
+    async def run_fix_quality(self, context: IssueContext, failure_summary: str) -> AgentResult:
+        """Run the agent to fix quality check failures."""
+        prompt = f"""Quality checks failed after your implementation for issue #{context.number}. Fix the failures.
+
+## Quality Check Failures
+
+{failure_summary}
+
+## Original Issue
+{context.format_for_prompt()}
+
+## Instructions
+
+1. Read the failure output carefully
+2. Fix the issues in the code (test failures, lint errors, type errors, etc.)
+3. Do NOT commit — the orchestrator handles commits
+4. Only fix what the quality checks report — don't refactor unrelated code
+5. If you cannot fix an issue, explain why
+
+When done, output: `AUTOCLAUDE_COMPLETE`
+
+If you genuinely cannot fix the issue:
+`AUTOCLAUDE_BLOCKED: <description of what's failing and what you tried>`
+
+Begin by understanding the failures, then implement fixes.
+"""
+        return await self._run_with_prompt(prompt)
+
     async def run_fix_ci(self, context: IssueContext, failure_summary: str) -> AgentResult:
         """Run the agent to fix CI failures."""
         prompt = f"""The CI pipeline failed for issue #{context.number}. Fix the failures.
@@ -321,6 +376,8 @@ Begin by understanding the failure, then implement fixes.
             )
 
             async for message in query(prompt=prompt, options=options):
+                self._log_verbose(message)
+
                 if hasattr(message, "subtype") and message.subtype == "init":
                     session_id = getattr(message, "session_id", None)
 

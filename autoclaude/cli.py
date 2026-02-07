@@ -109,6 +109,15 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--worktree-base", default="../", help="Base path for worktrees (default: ../)")
     parser.add_argument("--context-dir", default=None, help="Override context discovery directory")
     parser.add_argument("--no-context", action="store_true", help="Skip context loading (AGENTS.md, etc.)")
+    parser.add_argument("--verbose", action="store_true", help="Stream agent actions to terminal in real-time")
+    parser.add_argument(
+        "--quality-check", action="append", default=[], dest="quality_checks",
+        help="Shell command to run as quality gate after agent (repeatable)",
+    )
+    parser.add_argument(
+        "--max-quality-retries", type=int, default=2,
+        help="Max attempts to fix quality failures (default: 2)",
+    )
 
 
 MODEL_IDS = {
@@ -152,6 +161,9 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
         worktree_base_path=args.worktree_base,
         context_dir=args.context_dir,
         no_context=args.no_context,
+        verbose=getattr(args, "verbose", False),
+        quality_checks=getattr(args, "quality_checks", []),
+        max_quality_retries=getattr(args, "max_quality_retries", 2),
     )
 
 

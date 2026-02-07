@@ -8,6 +8,7 @@ dependencies = [
     "claude-agent-sdk>=0.1.0",
     "PyGithub>=2.1.0",
     "python-dotenv>=1.0.0",
+    "PyYAML>=6.0",
 ]
 
 [project.scripts]
