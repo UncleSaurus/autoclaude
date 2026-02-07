@@ -23,6 +23,8 @@ GITHUB_BOT_ASSIGNEE=claude-bot # Bot username for claiming (optional)
 GITHUB_HUMAN_REVIEWER=username # Human fallback for blocked issues (optional)
 ```
 
+Variables can be set in a `.env` file in the project root (loaded automatically via dotenv). The git repo root `.env` is also checked, so worktree invocations inherit the main project's env.
+
 If `ANTHROPIC_API_KEY` is not set, the Claude CLI falls back to OAuth authentication (Max plan token from `claude login`).
 
 ## Quick Start

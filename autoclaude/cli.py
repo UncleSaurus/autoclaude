@@ -6,8 +6,26 @@ import asyncio
 import os
 import sys
 
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+
+# Load .env from cwd at startup (before worktree changes cwd).
+# Also check git repo root so worktree invocations find the main .env.
+_cwd_env = Path.cwd() / ".env"
+load_dotenv(_cwd_env)
+
+import subprocess as _sp
+try:
+    _git_root = _sp.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, timeout=5,
+    ).stdout.strip()
+    if _git_root:
+        _root_env = Path(_git_root) / ".env"
+        if _root_env != _cwd_env.resolve():
+            load_dotenv(_root_env, override=False)
+except Exception:
+    pass
 
 from .config import AutoClaudeConfig
 from .loop import IterationLoop
