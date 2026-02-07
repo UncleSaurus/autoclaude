@@ -344,9 +344,12 @@ class GitOperations:
         result = self._run_git("commit", "-m", message, check=False)
 
         if result.returncode != 0:
-            if "nothing to commit" in result.stdout or "nothing to commit" in result.stderr:
+            combined = result.stdout + result.stderr
+            if "nothing to commit" in combined:
                 return ""
-            raise RuntimeError(f"Commit failed: {result.stderr}")
+            # Include both stdout and stderr for diagnosis
+            error_detail = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+            raise RuntimeError(f"Commit failed: {error_detail}")
 
         sha_result = self._run_git("rev-parse", "HEAD")
         return sha_result.stdout.strip()
