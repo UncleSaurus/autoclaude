@@ -5,10 +5,11 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-from claude_agent_sdk import ClaudeAgentOptions, query
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
 from .config import AutoClaudeConfig
 from .models import ClarificationOption, ClarificationQuestion, ClarificationRequest, IssueContext
+from .permission_guard import build_hooks
 
 
 @dataclass
@@ -141,56 +142,17 @@ Begin by reading any referenced files to understand the current state, then impl
             project_context: Pre-loaded project context to prepend to prompt.
         """
         prompt = self._build_prompt(context, project_context)
-        output_lines: list[str] = []
-        session_id: Optional[str] = None
-
-        try:
-            options = ClaudeAgentOptions(
-                permission_mode="bypassPermissions",
-                allowed_tools=[
-                    "Read", "Write", "Edit", "Bash",
-                    "Glob", "Grep", "WebSearch", "WebFetch",
-                ],
-                model=self.config.model,
-                max_turns=self.config.max_turns,
-                cwd=self.config.worktree_path,
-            )
-
-            async for message in query(prompt=prompt, options=options):
-                self._log_verbose(message)
-
-                if hasattr(message, "subtype") and message.subtype == "init":
-                    session_id = getattr(message, "session_id", None)
-
-                if hasattr(message, "result"):
-                    output_lines.append(str(message.result))
-                elif hasattr(message, "content"):
-                    output_lines.append(str(message.content))
-
-            full_output = "\n".join(output_lines)
-
-            blocked_match = re.search(r"AUTOCLAUDE_BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
-            # Also check legacy format
-            if not blocked_match:
-                blocked_match = re.search(r"BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
-
-            blocked = blocked_match is not None
-            blocking_question = blocked_match.group(1).strip() if blocked_match else None
-
-            return AgentResult(
-                success=not blocked,
-                blocked=blocked,
-                blocking_question=blocking_question,
-                session_id=session_id,
-                output=full_output,
-            )
-
-        except Exception as e:
-            return AgentResult(
-                success=False,
-                error=str(e),
-                output="\n".join(output_lines),
-            )
+        options = ClaudeAgentOptions(
+            allowed_tools=[
+                "Read", "Write", "Edit", "Bash",
+                "Glob", "Grep", "WebSearch", "WebFetch",
+            ],
+            model=self.config.model,
+            max_turns=self.config.max_turns,
+            cwd=self.config.worktree_path,
+            hooks=build_hooks(),
+        )
+        return await self._run_client(prompt, options)
 
     async def analyze_issue(self, context: IssueContext) -> AnalysisResult:
         """Analyze an issue to determine if clarification is needed."""
@@ -238,21 +200,15 @@ Analyze the issue now and provide your assessment.
 
         try:
             options = ClaudeAgentOptions(
-                permission_mode="bypassPermissions",
                 allowed_tools=["Read", "Glob", "Grep"],
                 model=self.config.model,
                 max_turns=10,
                 cwd=self.config.worktree_path,
+                hooks=build_hooks(),
             )
 
-            output_lines: list[str] = []
-            async for message in query(prompt=prompt, options=options):
-                if hasattr(message, "result"):
-                    output_lines.append(str(message.result))
-                elif hasattr(message, "content"):
-                    output_lines.append(str(message.content))
-
-            full_output = "\n".join(output_lines)
+            result = await self._run_client(prompt, options)
+            full_output = result.output
             full_output = full_output.replace("\\n", "\n")
 
             if "READY_TO_IMPLEMENT" in full_output:
@@ -360,48 +316,51 @@ Begin by understanding the failure, then implement fixes.
 
     async def _run_with_prompt(self, prompt: str) -> AgentResult:
         """Run agent with a specific prompt."""
+        options = ClaudeAgentOptions(
+            allowed_tools=[
+                "Read", "Write", "Edit", "Bash",
+                "Glob", "Grep",
+            ],
+            model=self.config.model,
+            max_turns=self.config.max_turns,
+            cwd=self.config.worktree_path,
+            hooks=build_hooks(),
+        )
+        return await self._run_client(prompt, options)
+
+    async def _run_client(self, prompt: str, options: ClaudeAgentOptions) -> AgentResult:
+        """Run agent using ClaudeSDKClient (required for can_use_tool callback)."""
         output_lines: list[str] = []
         session_id: Optional[str] = None
 
         try:
-            options = ClaudeAgentOptions(
-                permission_mode="bypassPermissions",
-                allowed_tools=[
-                    "Read", "Write", "Edit", "Bash",
-                    "Glob", "Grep",
-                ],
-                model=self.config.model,
-                max_turns=self.config.max_turns,
-                cwd=self.config.worktree_path,
-            )
+            async with ClaudeSDKClient(options) as client:
+                await client.query(prompt)
 
-            async for message in query(prompt=prompt, options=options):
-                self._log_verbose(message)
+                async for message in client.receive_response():
+                    self._log_verbose(message)
 
-                if hasattr(message, "subtype") and message.subtype == "init":
-                    session_id = getattr(message, "session_id", None)
+                    if hasattr(message, "subtype") and message.subtype == "init":
+                        session_id = getattr(message, "session_id", None)
 
-                if hasattr(message, "result"):
-                    output_lines.append(str(message.result))
-                elif hasattr(message, "content"):
-                    output_lines.append(str(message.content))
+                    if hasattr(message, "result"):
+                        output_lines.append(str(message.result))
+                    elif hasattr(message, "content"):
+                        output_lines.append(str(message.content))
 
             full_output = "\n".join(output_lines)
+
             blocked_match = re.search(r"AUTOCLAUDE_BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
             if not blocked_match:
                 blocked_match = re.search(r"BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
 
-            if blocked_match:
-                return AgentResult(
-                    success=False,
-                    blocked=True,
-                    blocking_question=blocked_match.group(1).strip(),
-                    session_id=session_id,
-                    output=full_output,
-                )
+            blocked = blocked_match is not None
+            blocking_question = blocked_match.group(1).strip() if blocked_match else None
 
             return AgentResult(
-                success=True,
+                success=not blocked,
+                blocked=blocked,
+                blocking_question=blocking_question,
                 session_id=session_id,
                 output=full_output,
             )

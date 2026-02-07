@@ -128,6 +128,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--context-dir", default=None, help="Override context discovery directory")
     parser.add_argument("--no-context", action="store_true", help="Skip context loading (AGENTS.md, etc.)")
     parser.add_argument("--verbose", action="store_true", help="Stream agent actions to terminal in real-time")
+    parser.add_argument("--oauth", action="store_true", help="Use Claude CLI OAuth (Max plan) instead of API key")
     parser.add_argument(
         "--quality-check", action="append", default=[], dest="quality_checks",
         help="Shell command to run as quality gate after agent (repeatable)",
@@ -145,14 +146,21 @@ MODEL_IDS = {
 }
 
 
-def validate_env() -> tuple[str, str]:
+def validate_env(*, oauth: bool = False) -> tuple[str, str]:
     github_token = os.environ.get("GITHUB_TOKEN", "")
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
     if not github_token:
         print("Error: GITHUB_TOKEN environment variable is required", file=sys.stderr)
         sys.exit(1)
 
+    if oauth:
+        # Strip all Anthropic auth tokens so Claude CLI uses OAuth (Max plan) auth
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        print("Using Claude CLI OAuth auth (Max plan)", file=sys.stderr)
+        return github_token, ""
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not anthropic_key:
         print("Note: ANTHROPIC_API_KEY not set, using Claude CLI OAuth auth", file=sys.stderr)
 
@@ -182,7 +190,7 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
 
 
 async def cmd_claim(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env()
+    github_token, anthropic_key = validate_env(oauth=args.oauth)
     config = make_config(args, github_token, anthropic_key)
     config.issue_number = args.issue
 
@@ -213,7 +221,7 @@ async def cmd_claim(args: argparse.Namespace) -> int:
 
 
 async def cmd_process(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env()
+    github_token, anthropic_key = validate_env(oauth=args.oauth)
     config = make_config(args, github_token, anthropic_key)
     config.issue_number = args.issue
 
@@ -239,7 +247,7 @@ async def cmd_process(args: argparse.Namespace) -> int:
 
 async def cmd_batch(args: argparse.Namespace) -> int:
     """Handle the 'batch' command for PRD-based processing."""
-    github_token, anthropic_key = validate_env()
+    github_token, anthropic_key = validate_env(oauth=args.oauth)
     config = make_config(args, github_token, anthropic_key, repo="")
 
     loop = IterationLoop(config)
@@ -254,7 +262,7 @@ async def cmd_batch(args: argparse.Namespace) -> int:
 
 
 async def cmd_orchestrate(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env()
+    github_token, anthropic_key = validate_env(oauth=args.oauth)
 
     orchestrator = create_multi_repo_orchestrator(
         github_token=github_token,
@@ -293,7 +301,7 @@ async def cmd_orchestrate(args: argparse.Namespace) -> int:
 
 
 async def cmd_multi(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env()
+    github_token, anthropic_key = validate_env(oauth=args.oauth)
 
     upstream_set = set(args.upstream)
     repos = []

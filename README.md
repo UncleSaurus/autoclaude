@@ -126,11 +126,32 @@ AutoClaude automatically loads context files from the project root to give the a
 
 Skip with `--no-context` or override the discovery root with `--context-dir`.
 
+## Permission Guard
+
+AutoClaude uses Claude Agent SDK **PreToolUse hooks** instead of `bypassPermissions`. This means it works with both API key auth and OAuth/Max plan auth — no `ANTHROPIC_API_KEY` required. Use `--oauth` to explicitly strip API keys and force OAuth.
+
+The orchestrator acts as the security gate, auto-approving safe operations and blocking dangerous ones:
+
+**Always allowed:** Read, Glob, Grep, WebSearch, WebFetch (read-only tools)
+
+**Allowed with path validation:** Write, Edit (blocked for system paths, credentials, `.env` files)
+
+**Bash — validated per-command.** Blocked patterns include:
+- Destructive: `rm -rf`, `sudo rm`, `mkfs`, `dd of=/dev/`
+- Git destruction: `push --force`, `reset --hard`, `clean -f`, `checkout .`
+- System: `sudo`, `kill -9`, `shutdown`, `chmod 777`
+- Exfiltration: `curl --data`, `printenv`
+- Database: `DROP TABLE`, `DELETE FROM ... ;` (no WHERE)
+
+Blocked commands are denied with a message — the agent retries with a safer alternative.
+
+To customize, edit `autoclaude/permission_guard.py`.
+
 ## How It Works
 
 1. **Claim** — Labels issue `agent-claimed`, creates a branch
 2. **Analyze** — Optionally checks if issue needs clarification first
-3. **Implement** — Spawns Claude Agent SDK session with full tool access
+3. **Implement** — Spawns Claude Agent SDK session with permission-guarded tool access
 4. **Quality gate** — Runs project-defined checks, feeds failures back for fixing
 5. **Commit & push** — Commits changes (excluding `.autoclaude/`), pushes branch
 6. **CI** — Waits for CI, attempts fixes if it fails (up to 3 retries)
@@ -170,6 +191,7 @@ Common flags (all commands):
 | `--verbose` | off | Stream agent actions to stderr |
 | `--quality-check` | none | Shell command quality gate (repeatable) |
 | `--max-quality-retries` | 2 | Retry limit for quality fix attempts |
+| `--oauth` | off | Force OAuth auth (strips API keys) |
 
 ## License
 
