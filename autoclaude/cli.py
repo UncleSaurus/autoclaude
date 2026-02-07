@@ -131,16 +131,12 @@ def validate_env() -> tuple[str, str]:
     github_token = os.environ.get("GITHUB_TOKEN", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
-    errors = []
     if not github_token:
-        errors.append("GITHUB_TOKEN environment variable is required")
-    if not anthropic_key:
-        errors.append("ANTHROPIC_API_KEY environment variable is required")
-
-    if errors:
-        for error in errors:
-            print(f"Error: {error}", file=sys.stderr)
+        print("Error: GITHUB_TOKEN environment variable is required", file=sys.stderr)
         sys.exit(1)
+
+    if not anthropic_key:
+        print("Note: ANTHROPIC_API_KEY not set, using Claude CLI OAuth auth", file=sys.stderr)
 
     return github_token, anthropic_key
 

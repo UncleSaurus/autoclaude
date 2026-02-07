@@ -29,7 +29,7 @@ def test_config_validate_missing_token():
     config = AutoClaudeConfig(repo="owner/repo", github_token="", anthropic_api_key="")
     errors = config.validate()
     assert any("GITHUB_TOKEN" in e for e in errors)
-    assert any("ANTHROPIC_API_KEY" in e for e in errors)
+    # anthropic_api_key is optional (falls back to Claude CLI OAuth)
 
 
 def test_config_validate_bad_repo():

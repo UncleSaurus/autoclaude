@@ -78,8 +78,7 @@ class AutoClaudeConfig:
         if not self.repo:
             errors.append("Repository (--repo) is required")
 
-        if not self.anthropic_api_key:
-            errors.append("ANTHROPIC_API_KEY environment variable is required")
+        # anthropic_api_key is optional — Claude CLI falls back to OAuth auth
 
         if "/" not in self.repo and self.repo:
             errors.append("Repository must be in format 'owner/repo'")

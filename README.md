@@ -17,11 +17,13 @@ uv pip install -e /path/to/autoclaude
 ## Environment Variables
 
 ```bash
-GITHUB_TOKEN=ghp_...           # GitHub PAT with repo access
-ANTHROPIC_API_KEY=sk-ant-...   # Claude API key
+GITHUB_TOKEN=ghp_...           # GitHub PAT with repo access (required)
+ANTHROPIC_API_KEY=sk-ant-...   # Claude API key (optional if logged in via `claude login`)
 GITHUB_BOT_ASSIGNEE=claude-bot # Bot username for claiming (optional)
 GITHUB_HUMAN_REVIEWER=username # Human fallback for blocked issues (optional)
 ```
+
+If `ANTHROPIC_API_KEY` is not set, the Claude CLI falls back to OAuth authentication (Max plan token from `claude login`).
 
 ## Quick Start
 
