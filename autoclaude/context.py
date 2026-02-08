@@ -48,6 +48,9 @@ def _resolve_file_references(content: str, seen: set[str]) -> list[tuple[Path, s
 def discover_context_files(root: str | Path) -> list[tuple[Path, str]]:
     """Discover context files in a directory.
 
+    Deduplicates by resolved path so symlinks (e.g., CLAUDE.md -> AGENTS.md)
+    don't cause the same file to be loaded twice.
+
     Args:
         root: Directory to search for context files.
 
@@ -56,11 +59,15 @@ def discover_context_files(root: str | Path) -> list[tuple[Path, str]]:
     """
     root = Path(root)
     found = []
+    seen: set[str] = set()
 
     for filename, description in CONTEXT_FILES:
         path = root / filename
         if path.is_file():
-            found.append((path, description))
+            resolved = str(path.resolve())
+            if resolved not in seen:
+                seen.add(resolved)
+                found.append((path, description))
 
     return found
 
