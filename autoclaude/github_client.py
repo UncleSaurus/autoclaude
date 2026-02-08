@@ -188,10 +188,20 @@ class GitHubClient:
         base: str = "main",
         draft: bool = False,
     ) -> tuple[int, str]:
-        """Create a pull request. Returns (pr_number, pr_url)."""
+        """Create a pull request, or return existing one for the branch.
+
+        Returns (pr_number, pr_url).
+        """
         if self.config.dry_run:
             print(f"[DRY RUN] Would create PR: {title}")
             return (0, "https://github.com/dry-run/pr")
+
+        # Check for existing PR on this branch before creating a duplicate.
+        existing = list(self.repo.get_pulls(state="open", head=f"{self.repo.owner.login}:{head}"))
+        if existing:
+            pr = existing[0]
+            print(f"  PR #{pr.number} already exists for branch {head}, skipping creation")
+            return (pr.number, pr.html_url)
 
         pr = self.repo.create_pull(
             title=title,
