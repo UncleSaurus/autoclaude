@@ -10,6 +10,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from .config import AutoClaudeConfig
 from .models import ClarificationOption, ClarificationQuestion, ClarificationRequest, IssueContext
 from .permission_guard import build_hooks
+from .progress import is_complete
 
 
 @dataclass
@@ -64,17 +65,16 @@ class AgentRunner:
             cost = f" ${message.total_cost_usd:.4f}" if message.total_cost_usd else ""
             print(f"\033[32m[done]\033[0m {message.num_turns} turns, {secs:.1f}s{cost}", file=sys.stderr)
 
-    def _build_prompt(self, context: IssueContext, project_context: str = "") -> str:
+    def _build_prompt(self, context: IssueContext) -> str:
         """Build the prompt for Claude from issue context.
+
+        Project context (AGENTS.md, CLAUDE.md, etc.) is injected via the system
+        prompt using SystemPromptPreset, not prepended here.
 
         Args:
             context: The GitHub issue context.
-            project_context: Pre-loaded project context (AGENTS.md, etc.) to prepend.
         """
         sections = []
-
-        if project_context:
-            sections.append(project_context)
 
         sections.append(f"""You are an autonomous coding agent processing a GitHub issue. Your task is to fully implement the requested changes.
 
@@ -139,9 +139,17 @@ Begin by reading any referenced files to understand the current state, then impl
 
         Args:
             context: The GitHub issue context.
-            project_context: Pre-loaded project context to prepend to prompt.
+            project_context: Pre-loaded project context injected via system prompt.
         """
-        prompt = self._build_prompt(context, project_context)
+        prompt = self._build_prompt(context)
+
+        # Inject project context via system prompt (appended to Claude Code defaults).
+        # Using the preset preserves Claude Code's built-in system prompt.
+        # Without this, system_prompt=None causes --system-prompt "" which wipes defaults.
+        system_prompt: dict = {"type": "preset", "preset": "claude_code"}
+        if project_context:
+            system_prompt["append"] = project_context
+
         options = ClaudeAgentOptions(
             allowed_tools=[
                 "Read", "Write", "Edit", "Bash",
@@ -151,6 +159,8 @@ Begin by reading any referenced files to understand the current state, then impl
             max_turns=self.config.max_turns,
             cwd=self.config.worktree_path,
             hooks=build_hooks(),
+            system_prompt=system_prompt,
+            setting_sources=["user", "project", "local"],
         )
         return await self._run_client(prompt, options)
 
@@ -205,6 +215,8 @@ Analyze the issue now and provide your assessment.
                 max_turns=10,
                 cwd=self.config.worktree_path,
                 hooks=build_hooks(),
+                system_prompt={"type": "preset", "preset": "claude_code"},
+                setting_sources=["user", "project", "local"],
             )
 
             result = await self._run_client(prompt, options)
@@ -325,6 +337,8 @@ Begin by understanding the failure, then implement fixes.
             max_turns=self.config.max_turns,
             cwd=self.config.worktree_path,
             hooks=build_hooks(),
+            system_prompt={"type": "preset", "preset": "claude_code"},
+            setting_sources=["user", "project", "local"],
         )
         return await self._run_client(prompt, options)
 
@@ -349,25 +363,37 @@ Begin by understanding the failure, then implement fixes.
                         output_lines.append(str(message.content))
 
             full_output = "\n".join(output_lines)
-
-            blocked_match = re.search(r"AUTOCLAUDE_BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
-            if not blocked_match:
-                blocked_match = re.search(r"BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
-
-            blocked = blocked_match is not None
-            blocking_question = blocked_match.group(1).strip() if blocked_match else None
-
-            return AgentResult(
-                success=not blocked,
-                blocked=blocked,
-                blocking_question=blocking_question,
-                session_id=session_id,
-                output=full_output,
-            )
+            return self._parse_agent_output(full_output, session_id)
 
         except Exception as e:
+            # The subprocess may exit non-zero even after successful completion.
+            # Check captured output for completion signal before assuming failure.
+            full_output = "\n".join(output_lines)
+            result = self._parse_agent_output(full_output, session_id)
+            if result.success:
+                return result
             return AgentResult(
                 success=False,
                 error=str(e),
-                output="\n".join(output_lines),
+                output=full_output,
             )
+
+    @staticmethod
+    def _parse_agent_output(full_output: str, session_id: Optional[str] = None) -> AgentResult:
+        """Parse agent output for completion/blocked signals."""
+        completed = is_complete(full_output)
+
+        blocked_match = re.search(r"AUTOCLAUDE_BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
+        if not blocked_match:
+            blocked_match = re.search(r"BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
+
+        blocked = blocked_match is not None
+        blocking_question = blocked_match.group(1).strip() if blocked_match else None
+
+        return AgentResult(
+            success=completed or (not blocked),
+            blocked=blocked,
+            blocking_question=blocking_question,
+            session_id=session_id,
+            output=full_output,
+        )
