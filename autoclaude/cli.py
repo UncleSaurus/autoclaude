@@ -125,6 +125,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-iterations", type=int, default=1, help="Max iterations per issue (default: 1, set higher for complex issues)")
     parser.add_argument("--worktree", action="store_true", help="Use isolated git worktree per issue")
     parser.add_argument("--worktree-base", default="../", help="Base path for worktrees (default: ../)")
+    parser.add_argument("--repo-dir", default=None, help="Local path to target repository (default: cwd)")
     parser.add_argument("--context-dir", default=None, help="Override context discovery directory")
     parser.add_argument("--no-context", action="store_true", help="Skip context loading (AGENTS.md, etc.)")
     parser.add_argument("--verbose", action="store_true", help="Stream agent actions to terminal in real-time")
@@ -179,6 +180,7 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
         max_turns=args.max_turns,
         max_iterations=args.max_iterations,
         dry_run=args.dry_run,
+        repo_dir=getattr(args, "repo_dir", None),
         use_worktree=args.worktree,
         worktree_base_path=args.worktree_base,
         context_dir=args.context_dir,

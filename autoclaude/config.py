@@ -49,6 +49,9 @@ class AutoClaudeConfig:
     # Specific issue to process (None = process all assigned)
     issue_number: Optional[int] = None
 
+    # Repository location
+    repo_dir: Optional[str] = None  # Local filesystem path to target repo (default: cwd)
+
     # Worktree settings for isolation
     use_worktree: bool = False
     worktree_base_path: str = "../"

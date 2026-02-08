@@ -267,7 +267,7 @@ class GitOperations:
     def _run_git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command, optionally in the worktree directory."""
         cmd = ["git"] + list(args)
-        cwd = self.worktree_path if self.worktree_path else None
+        cwd = self.worktree_path or self.config.repo_dir or None
         if self.config.dry_run:
             cwd_msg = f" (in {cwd})" if cwd else ""
             print(f"[DRY RUN] Would run: {' '.join(cmd)}{cwd_msg}")

@@ -28,7 +28,7 @@ class TicketProcessor:
         self.session_id = str(uuid.uuid4())[:8]
 
     def _get_context_root(self) -> str:
-        return self.config.context_dir or self.config.worktree_path or "."
+        return self.config.context_dir or self.config.worktree_path or self.config.repo_dir or "."
 
     def _load_project_context(self) -> str:
         """Load project context for agent prompts."""

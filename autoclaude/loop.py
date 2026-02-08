@@ -30,7 +30,7 @@ class IterationLoop:
 
     def _get_context_root(self) -> str:
         """Get the root directory for context loading."""
-        return self.config.context_dir or self.config.worktree_path or "."
+        return self.config.context_dir or self.config.worktree_path or self.config.repo_dir or "."
 
     def _build_iteration_context(
         self,
