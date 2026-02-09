@@ -52,6 +52,9 @@ class AutoClaudeConfig:
     # Repository location
     repo_dir: Optional[str] = None  # Local filesystem path to target repo (default: cwd)
 
+    # Git remote settings
+    git_remote: str = "origin"  # Git remote for fetch/push (default: origin)
+
     # Worktree settings for isolation
     use_worktree: bool = False
     worktree_base_path: str = "../"

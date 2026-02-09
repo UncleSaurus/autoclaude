@@ -383,12 +383,9 @@ Begin by understanding the failure, then implement fixes.
         """Parse agent output for completion/blocked signals."""
         completed = is_complete(full_output)
 
-        blocked_match = re.search(r"AUTOCLAUDE_BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
-        if not blocked_match:
-            blocked_match = re.search(r"BLOCKED:\s*(.+?)(?:\n|$)", full_output, re.IGNORECASE)
-
+        blocked_match = re.search(r"AUTOCLAUDE_BLOCKED:\s*(.+?)(?:\n|$)", full_output)
         blocked = blocked_match is not None
-        blocking_question = blocked_match.group(1).strip() if blocked_match else None
+        blocking_question = blocked_match.group(1).strip()[:500] if blocked_match else None
 
         return AgentResult(
             success=completed or (not blocked),

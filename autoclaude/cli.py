@@ -128,6 +128,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo-dir", default=None, help="Local path to target repository (default: cwd)")
     parser.add_argument("--context-dir", default=None, help="Override context discovery directory")
     parser.add_argument("--no-context", action="store_true", help="Skip context loading (AGENTS.md, etc.)")
+    parser.add_argument("--remote", default="origin", help="Git remote for fetch/push (default: origin)")
     parser.add_argument("--verbose", action="store_true", help="Stream agent actions to terminal in real-time")
     parser.add_argument("--oauth", action="store_true", help="Use Claude CLI OAuth (Max plan) instead of API key")
     parser.add_argument(
@@ -180,6 +181,7 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
         max_turns=args.max_turns,
         max_iterations=args.max_iterations,
         dry_run=args.dry_run,
+        git_remote=getattr(args, "remote", "origin"),
         repo_dir=getattr(args, "repo_dir", None),
         use_worktree=args.worktree,
         worktree_base_path=args.worktree_base,
