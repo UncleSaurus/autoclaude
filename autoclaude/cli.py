@@ -129,6 +129,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--context-dir", default=None, help="Override context discovery directory")
     parser.add_argument("--no-context", action="store_true", help="Skip context loading (AGENTS.md, etc.)")
     parser.add_argument("--remote", default="origin", help="Git remote for fetch/push (default: origin)")
+    parser.add_argument("--base-branch", default="main", help="Base branch name (default: main)")
     parser.add_argument("--verbose", action="store_true", help="Stream agent actions to terminal in real-time")
     parser.add_argument("--oauth", action="store_true", help="Use Claude CLI OAuth (Max plan) instead of API key")
     parser.add_argument(
@@ -182,6 +183,7 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
         max_iterations=args.max_iterations,
         dry_run=args.dry_run,
         git_remote=getattr(args, "remote", "origin"),
+        base_branch=getattr(args, "base_branch", "main"),
         repo_dir=getattr(args, "repo_dir", None),
         use_worktree=args.worktree,
         worktree_base_path=args.worktree_base,
@@ -370,6 +372,11 @@ def main() -> None:
     if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    # Load .env from --repo-dir so tokens are available without shell hacks.
+    repo_dir = getattr(args, "repo_dir", None)
+    if repo_dir:
+        load_dotenv(Path(repo_dir) / ".env", override=False)
 
     if args.dry_run:
         print("DRY RUN MODE\n")

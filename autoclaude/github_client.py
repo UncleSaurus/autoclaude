@@ -290,7 +290,7 @@ class GitOperations:
         self._run_git("fetch", remote)
 
         result = self._run_git(
-            "worktree", "add", worktree_path, "-b", branch_name, f"{remote}/main",
+            "worktree", "add", worktree_path, "-b", branch_name, f"{remote}/{self.config.base_branch}",
             check=False
         )
 
@@ -327,7 +327,7 @@ class GitOperations:
 
         remote = self.config.git_remote
         self._run_git("fetch", remote)
-        self._run_git("checkout", "-b", branch_name, f"{remote}/main")
+        self._run_git("checkout", "-b", branch_name, f"{remote}/{self.config.base_branch}")
 
         return BranchInfo(
             name=branch_name,
@@ -373,7 +373,7 @@ class GitOperations:
     def has_code_changes(self, base: str | None = None) -> bool:
         """Check if there are meaningful code changes (not just .autoclaude/)."""
         if base is None:
-            base = f"{self.config.git_remote}/main"
+            base = f"{self.config.git_remote}/{self.config.base_branch}"
         # Check uncommitted changes first
         porcelain = self._run_git("status", "--porcelain")
         for line in porcelain.stdout.strip().splitlines():
@@ -390,14 +390,14 @@ class GitOperations:
 
     def get_commit_count(self, base: str | None = None) -> int:
         if base is None:
-            base = f"{self.config.git_remote}/main"
+            base = f"{self.config.git_remote}/{self.config.base_branch}"
         result = self._run_git("rev-list", "--count", f"{base}..HEAD")
         return int(result.stdout.strip())
 
     def get_diff_summary(self, base: str | None = None) -> str:
         """Get a summary of changes since base for iteration context."""
         if base is None:
-            base = f"{self.config.git_remote}/main"
+            base = f"{self.config.git_remote}/{self.config.base_branch}"
         result = self._run_git("diff", "--stat", f"{base}..HEAD", check=False)
         return result.stdout.strip() if result.returncode == 0 else ""
 

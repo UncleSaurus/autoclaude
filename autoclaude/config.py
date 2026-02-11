@@ -54,6 +54,7 @@ class AutoClaudeConfig:
 
     # Git remote settings
     git_remote: str = "origin"  # Git remote for fetch/push (default: origin)
+    base_branch: str = "main"  # Base branch name (default: main)
 
     # Worktree settings for isolation
     use_worktree: bool = False
