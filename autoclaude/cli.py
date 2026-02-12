@@ -45,22 +45,24 @@ def create_parser() -> argparse.ArgumentParser:
     # Claim command
     claim_parser = subparsers.add_parser(
         "claim",
-        help="Claim and process issues using labels",
+        help="Claim and process issues/work items using labels/tags",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # GitHub
   autoclaude claim --repo owner/repo
   autoclaude claim --repo owner/repo --label bug
   autoclaude claim --repo owner/repo --issue 42
-  autoclaude claim --repo owner/repo --issue 42 --max-iterations 5
-  autoclaude claim --repo owner/repo --issue 42 --worktree
-  autoclaude claim --repo owner/repo --dry-run
+
+  # Azure DevOps
+  autoclaude claim --platform azuredevops --ado-org MapLarge --ado-project "Data Science" --ado-repo my-repo
+  autoclaude claim --platform azuredevops --issue 183
 """,
     )
     _add_common_args(claim_parser)
-    claim_parser.add_argument("--repo", required=True, help="GitHub repository (owner/repo)")
-    claim_parser.add_argument("--issue", type=int, help="Specific issue number to process")
-    claim_parser.add_argument("--label", default="enhancement", help="Label to filter issues (default: enhancement)")
+    claim_parser.add_argument("--repo", help="GitHub repository (owner/repo)")
+    claim_parser.add_argument("--issue", type=int, help="Specific issue/work item number to process")
+    claim_parser.add_argument("--label", default="enhancement", help="Label/tag to filter issues (default: enhancement)")
 
     # Process command (legacy)
     process_parser = subparsers.add_parser(
@@ -68,7 +70,7 @@ Examples:
         help="Process issues assigned to bot (legacy, use 'claim' instead)",
     )
     _add_common_args(process_parser)
-    process_parser.add_argument("--repo", required=True, help="GitHub repository (owner/repo)")
+    process_parser.add_argument("--repo", help="GitHub repository (owner/repo)")
     process_parser.add_argument("--issue", type=int, help="Specific issue number")
 
     # Batch command (NEW)
@@ -117,21 +119,42 @@ PRD format (prd.json):
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
+    # Platform selection
+    parser.add_argument("--platform", choices=["github", "azuredevops"], default="github",
+                        help="Ticket platform (default: github)")
+
+    # ADO-specific
+    parser.add_argument("--ado-org", default=os.environ.get("ADO_ORG", ""),
+                        help="Azure DevOps organization (env: ADO_ORG)")
+    parser.add_argument("--ado-project", default=os.environ.get("ADO_PROJECT", ""),
+                        help="Azure DevOps project (env: ADO_PROJECT)")
+    parser.add_argument("--ado-repo", default=os.environ.get("ADO_REPO", ""),
+                        help="Azure DevOps repository name (env: ADO_REPO)")
+
+    # Common args
     parser.add_argument("--assignee", default=os.environ.get("GITHUB_BOT_ASSIGNEE", "claude-bot"))
     parser.add_argument("--reviewer", default=os.environ.get("GITHUB_HUMAN_REVIEWER", ""))
-    parser.add_argument("--model", choices=["opus", "sonnet", "haiku"], default="sonnet", help="Claude model (default: sonnet)")
+    parser.add_argument("--model", choices=["opus", "sonnet", "haiku"], default="sonnet",
+                        help="Claude model (default: sonnet)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
-    parser.add_argument("--max-turns", type=int, default=50, help="Max agent turns per iteration (default: 50)")
-    parser.add_argument("--max-iterations", type=int, default=1, help="Max iterations per issue (default: 1, set higher for complex issues)")
+    parser.add_argument("--max-turns", type=int, default=50,
+                        help="Max agent turns per iteration (default: 50)")
+    parser.add_argument("--max-iterations", type=int, default=1,
+                        help="Max iterations per issue (default: 1, set higher for complex issues)")
     parser.add_argument("--worktree", action="store_true", help="Use isolated git worktree per issue")
     parser.add_argument("--worktree-base", default="../", help="Base path for worktrees (default: ../)")
     parser.add_argument("--repo-dir", default=None, help="Local path to target repository (default: cwd)")
     parser.add_argument("--context-dir", default=None, help="Override context discovery directory")
     parser.add_argument("--no-context", action="store_true", help="Skip context loading (AGENTS.md, etc.)")
+    parser.add_argument("--skip-clarification", action="store_true",
+                        help="Skip issue analysis/clarification phase")
     parser.add_argument("--remote", default="origin", help="Git remote for fetch/push (default: origin)")
     parser.add_argument("--base-branch", default="main", help="Base branch name (default: main)")
     parser.add_argument("--verbose", action="store_true", help="Stream agent actions to terminal in real-time")
-    parser.add_argument("--oauth", action="store_true", help="Use Claude CLI OAuth (Max plan) instead of API key")
+    parser.add_argument("--use-api-key", action="store_true",
+                        help="Use ANTHROPIC_API_KEY for billing instead of OAuth/Max plan tokens")
+    parser.add_argument("--cli-path", default=None,
+                        help="Path to claude CLI binary (default: auto-detect native install)")
     parser.add_argument(
         "--quality-check", action="append", default=[], dest="quality_checks",
         help="Shell command to run as quality gate after agent (repeatable)",
@@ -149,33 +172,72 @@ MODEL_IDS = {
 }
 
 
-def validate_env(*, oauth: bool = False) -> tuple[str, str]:
+def _detect_native_claude_cli() -> str | None:
+    """Auto-detect the native Claude CLI installed by Claude desktop app."""
+    base = Path.home() / "Library" / "Application Support" / "Claude" / "claude-code"
+    if not base.exists():
+        return None
+    # Find latest version directory
+    versions = sorted(
+        [d for d in base.iterdir() if d.is_dir() and (d / "claude").exists()],
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    if versions:
+        return str(versions[0] / "claude")
+    return None
+
+
+def validate_env(platform: str = "github", *, use_api_key: bool = False) -> tuple[str, str]:
+    """Validate environment and return (github_token, anthropic_key).
+
+    Default: strips ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN so the SDK
+    falls back to the active `claude login` session (Max plan tokens).
+    Pass use_api_key=True to keep the API key for billing.
+    """
     github_token = os.environ.get("GITHUB_TOKEN", "")
 
-    if not github_token:
-        print("Error: GITHUB_TOKEN environment variable is required", file=sys.stderr)
+    errors = []
+    if platform == "github" and not github_token:
+        errors.append("GITHUB_TOKEN environment variable is required for GitHub platform")
+
+    if errors:
+        for error in errors:
+            print(f"Error: {error}", file=sys.stderr)
         sys.exit(1)
 
-    if oauth:
-        # Strip all Anthropic auth tokens so Claude CLI uses OAuth (Max plan) auth
-        os.environ.pop("ANTHROPIC_API_KEY", None)
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-        print("Using Claude CLI OAuth auth (Max plan)", file=sys.stderr)
-        return github_token, ""
+    if use_api_key:
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not anthropic_key:
+            print("Warning: --use-api-key specified but ANTHROPIC_API_KEY not set", file=sys.stderr)
+        else:
+            print("Using ANTHROPIC_API_KEY for billing", file=sys.stderr)
+        return github_token, anthropic_key
 
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not anthropic_key:
-        print("Note: ANTHROPIC_API_KEY not set, using Claude CLI OAuth auth", file=sys.stderr)
-
-    return github_token, anthropic_key
+    # Default: strip API key AND auth token so the SDK falls back to
+    # the active `claude login` session (Max plan tokens).
+    # Without this, a stale ANTHROPIC_AUTH_TOKEN from .env would override
+    # the live OAuth session.
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+    print("Using OAuth/Max plan auth (pass --use-api-key to use API billing)", file=sys.stderr)
+    return github_token, ""
 
 
 def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str, repo: str = "") -> AutoClaudeConfig:
     """Build an AutoClaudeConfig from CLI args."""
+    # Resolve CLI path: explicit flag > auto-detect native > SDK default (PATH lookup)
+    cli_path = getattr(args, "cli_path", None)
+    if not cli_path:
+        cli_path = _detect_native_claude_cli()
+        if cli_path:
+            print(f"Auto-detected native Claude CLI: {cli_path}", file=sys.stderr)
+
     return AutoClaudeConfig(
+        platform=args.platform,
         github_token=github_token,
         anthropic_api_key=anthropic_key,
-        repo=repo or getattr(args, "repo", ""),
+        repo=repo or getattr(args, "repo", "") or "",
         bot_assignee=args.assignee,
         human_reviewer=args.reviewer,
         model=MODEL_IDS[args.model],
@@ -189,14 +251,19 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
         worktree_base_path=args.worktree_base,
         context_dir=args.context_dir,
         no_context=args.no_context,
+        skip_clarification=getattr(args, "skip_clarification", False),
         verbose=getattr(args, "verbose", False),
         quality_checks=getattr(args, "quality_checks", []),
         max_quality_retries=getattr(args, "max_quality_retries", 2),
+        ado_org=args.ado_org,
+        ado_project=args.ado_project,
+        ado_repo=args.ado_repo,
+        cli_path=cli_path,
     )
 
 
 async def cmd_claim(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env(oauth=args.oauth)
+    github_token, anthropic_key = validate_env(args.platform, use_api_key=args.use_api_key)
     config = make_config(args, github_token, anthropic_key)
     config.issue_number = args.issue
 
@@ -207,6 +274,7 @@ async def cmd_claim(args: argparse.Namespace) -> int:
         return 1
 
     processor = TicketProcessor(config)
+    target = config.repo or f"{config.ado_org}/{config.ado_project}"
     print(f"Session: {processor.session_id}")
     if config.max_iterations > 1:
         print(f"Max iterations: {config.max_iterations}")
@@ -215,11 +283,11 @@ async def cmd_claim(args: argparse.Namespace) -> int:
         if processor.github.is_claimed(config.issue_number):
             print(f"Issue #{config.issue_number} is already claimed")
             return 1
-        print(f"Claiming issue #{config.issue_number} in {args.repo}...")
+        print(f"Claiming issue #{config.issue_number} in {target}...")
         result = await processor.process_single(config.issue_number)
         results = [result]
     else:
-        print(f"Finding claimable issues in {args.repo} with label '{args.label}'...")
+        print(f"Finding claimable issues in {target} with label '{args.label}'...")
         results = await processor.process_claimable(args.label)
 
     _print_summary(results)
@@ -227,7 +295,7 @@ async def cmd_claim(args: argparse.Namespace) -> int:
 
 
 async def cmd_process(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env(oauth=args.oauth)
+    github_token, anthropic_key = validate_env(args.platform, use_api_key=args.use_api_key)
     config = make_config(args, github_token, anthropic_key)
     config.issue_number = args.issue
 
@@ -238,13 +306,14 @@ async def cmd_process(args: argparse.Namespace) -> int:
         return 1
 
     processor = TicketProcessor(config)
+    target = config.repo or f"{config.ado_org}/{config.ado_project}"
 
     if config.issue_number:
-        print(f"Processing issue #{config.issue_number} in {args.repo}...")
+        print(f"Processing issue #{config.issue_number} in {target}...")
         result = await processor.process_single(config.issue_number)
         results = [result]
     else:
-        print(f"Processing all assigned issues in {args.repo}...")
+        print(f"Processing all assigned issues in {target}...")
         results = await processor.process_all_assigned()
 
     _print_summary(results)
@@ -253,7 +322,7 @@ async def cmd_process(args: argparse.Namespace) -> int:
 
 async def cmd_batch(args: argparse.Namespace) -> int:
     """Handle the 'batch' command for PRD-based processing."""
-    github_token, anthropic_key = validate_env(oauth=args.oauth)
+    github_token, anthropic_key = validate_env(args.platform, use_api_key=args.use_api_key)
     config = make_config(args, github_token, anthropic_key, repo="")
 
     loop = IterationLoop(config)
@@ -268,7 +337,7 @@ async def cmd_batch(args: argparse.Namespace) -> int:
 
 
 async def cmd_orchestrate(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env(oauth=args.oauth)
+    github_token, anthropic_key = validate_env(args.platform, use_api_key=args.use_api_key)
 
     orchestrator = create_multi_repo_orchestrator(
         github_token=github_token,
@@ -307,7 +376,7 @@ async def cmd_orchestrate(args: argparse.Namespace) -> int:
 
 
 async def cmd_multi(args: argparse.Namespace) -> int:
-    github_token, anthropic_key = validate_env(oauth=args.oauth)
+    github_token, anthropic_key = validate_env(args.platform, use_api_key=args.use_api_key)
 
     upstream_set = set(args.upstream)
     repos = []

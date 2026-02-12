@@ -41,6 +41,14 @@ class AgentRunner:
     def __init__(self, config: AutoClaudeConfig):
         self.config = config
 
+    @staticmethod
+    def _build_system_prompt(project_context: str = "") -> dict:
+        """Build system prompt dict with optional project context appended."""
+        sp: dict = {"type": "preset", "preset": "claude_code"}
+        if project_context:
+            sp["append"] = project_context
+        return sp
+
     def _log_verbose(self, message) -> None:
         """Print agent message to stderr if verbose mode is on."""
         if not self.config.verbose:
@@ -143,13 +151,6 @@ Begin by reading any referenced files to understand the current state, then impl
         """
         prompt = self._build_prompt(context)
 
-        # Inject project context via system prompt (appended to Claude Code defaults).
-        # Using the preset preserves Claude Code's built-in system prompt.
-        # Without this, system_prompt=None causes --system-prompt "" which wipes defaults.
-        system_prompt: dict = {"type": "preset", "preset": "claude_code"}
-        if project_context:
-            system_prompt["append"] = project_context
-
         options = ClaudeAgentOptions(
             allowed_tools=[
                 "Read", "Write", "Edit", "Bash",
@@ -159,12 +160,13 @@ Begin by reading any referenced files to understand the current state, then impl
             max_turns=self.config.max_turns,
             cwd=self.config.worktree_path,
             hooks=build_hooks(),
-            system_prompt=system_prompt,
+            system_prompt=self._build_system_prompt(project_context),
             setting_sources=["user", "project", "local"],
+            cli_path=self.config.cli_path,
         )
         return await self._run_client(prompt, options)
 
-    async def analyze_issue(self, context: IssueContext) -> AnalysisResult:
+    async def analyze_issue(self, context: IssueContext, project_context: str = "") -> AnalysisResult:
         """Analyze an issue to determine if clarification is needed."""
         prompt = f"""You are analyzing a GitHub issue to determine if it's ready for implementation or needs clarification first.
 
@@ -215,8 +217,9 @@ Analyze the issue now and provide your assessment.
                 max_turns=10,
                 cwd=self.config.worktree_path,
                 hooks=build_hooks(),
-                system_prompt={"type": "preset", "preset": "claude_code"},
+                system_prompt=self._build_system_prompt(project_context),
                 setting_sources=["user", "project", "local"],
+                cli_path=self.config.cli_path,
             )
 
             result = await self._run_client(prompt, options)
@@ -272,7 +275,8 @@ Analyze the issue now and provide your assessment.
         except Exception as e:
             return AnalysisResult(ready_to_implement=False, error=str(e))
 
-    async def run_fix_quality(self, context: IssueContext, failure_summary: str) -> AgentResult:
+    async def run_fix_quality(self, context: IssueContext, failure_summary: str,
+                              project_context: str = "") -> AgentResult:
         """Run the agent to fix quality check failures."""
         prompt = f"""Quality checks failed after your implementation for issue #{context.number}. Fix the failures.
 
@@ -298,9 +302,10 @@ If you genuinely cannot fix the issue:
 
 Begin by understanding the failures, then implement fixes.
 """
-        return await self._run_with_prompt(prompt)
+        return await self._run_with_prompt(prompt, project_context=project_context)
 
-    async def run_fix_ci(self, context: IssueContext, failure_summary: str) -> AgentResult:
+    async def run_fix_ci(self, context: IssueContext, failure_summary: str,
+                         project_context: str = "") -> AgentResult:
         """Run the agent to fix CI failures."""
         prompt = f"""The CI pipeline failed for issue #{context.number}. Fix the failures.
 
@@ -324,9 +329,9 @@ When done, output: `AUTOCLAUDE_COMPLETE`
 
 Begin by understanding the failure, then implement fixes.
 """
-        return await self._run_with_prompt(prompt)
+        return await self._run_with_prompt(prompt, project_context=project_context)
 
-    async def _run_with_prompt(self, prompt: str) -> AgentResult:
+    async def _run_with_prompt(self, prompt: str, project_context: str = "") -> AgentResult:
         """Run agent with a specific prompt."""
         options = ClaudeAgentOptions(
             allowed_tools=[
@@ -337,8 +342,9 @@ Begin by understanding the failure, then implement fixes.
             max_turns=self.config.max_turns,
             cwd=self.config.worktree_path,
             hooks=build_hooks(),
-            system_prompt={"type": "preset", "preset": "claude_code"},
+            system_prompt=self._build_system_prompt(project_context),
             setting_sources=["user", "project", "local"],
+            cli_path=self.config.cli_path,
         )
         return await self._run_client(prompt, options)
 

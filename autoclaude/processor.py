@@ -12,6 +12,7 @@ from .context import load_context, load_progress_context
 from .github_client import GitHubClient, GitOperations
 from .loop import IterationLoop
 from .models import ClarificationRequest, IssueContext, ProcessingResult, ProcessingStatus
+from .platform import TicketPlatform
 from .progress import append_run, extract_learnings, extract_summary
 from .quality import QualityCheck, discover_checks, run_checks
 
@@ -19,9 +20,18 @@ from .quality import QualityCheck, discover_checks, run_checks
 class TicketProcessor:
     """Orchestrates the full ticket processing workflow."""
 
-    def __init__(self, config: AutoClaudeConfig):
+    def __init__(self, config: AutoClaudeConfig, platform: Optional[TicketPlatform] = None):
         self.config = config
-        self.github = GitHubClient(config)
+
+        # Platform client (GitHub or ADO) — injected or auto-created from config
+        if platform is not None:
+            self.github = platform
+        elif config.platform == "azuredevops":
+            from .ado_client import AdoClient
+            self.github = AdoClient(config)
+        else:
+            self.github = GitHubClient(config)
+
         self.git = GitOperations(config)
         self.agent = AgentRunner(config)
         self.loop = IterationLoop(config)
@@ -94,6 +104,9 @@ class TicketProcessor:
         )
 
         try:
+            # Load project context once for all agent calls in this issue
+            project_context = self._load_project_context()
+
             # Check if issue has 'agent-ready' label (skip clarification)
             skip_clarification = (
                 self.config.skip_clarification or
@@ -108,7 +121,7 @@ class TicketProcessor:
                 if self.config.dry_run:
                     print(f"  [DRY RUN] Would analyze issue #{context.number}")
                 else:
-                    analysis = await self.agent.analyze_issue(context)
+                    analysis = await self.agent.analyze_issue(context, project_context=project_context)
 
                     if analysis.error:
                         return self._handle_error(result, context, f"Analysis failed: {analysis.error}")
@@ -137,7 +150,7 @@ class TicketProcessor:
             if self.config.dry_run:
                 print(f"  [DRY RUN] Would run agent for issue #{context.number}")
                 print(f"  [DRY RUN] Issue: {context.title}")
-                print(f"  [DRY RUN] Context loaded: {bool(self._load_project_context())}")
+                print(f"  [DRY RUN] Context loaded: {bool(project_context)}")
                 result.status = ProcessingStatus.COMPLETED
                 result.completed_at = datetime.now()
                 return result
@@ -148,7 +161,6 @@ class TicketProcessor:
                 agent_result = await self.loop.run_issue_loop(context)
             else:
                 print(f"  Running agent...")
-                project_context = self._load_project_context()
                 agent_result = await self.agent.run(context, project_context=project_context)
 
             if agent_result.blocked:
@@ -170,7 +182,7 @@ class TicketProcessor:
             commit_msg = summary if summary else context.title
 
             # Step 6.5: Quality gate — run checks before committing
-            quality_ok = await self._run_quality_gate(context, agent_result)
+            quality_ok = await self._run_quality_gate(context, agent_result, project_context)
             if not quality_ok:
                 # Quality gate failures were fed back and retried.
                 # Re-extract summary in case the fix agent updated it.
@@ -187,7 +199,7 @@ class TicketProcessor:
             print(f"  Pushing branch and waiting for CI...")
             self.git.push_branch(branch.name)
 
-            ci_result = await self._wait_for_ci(branch.name, context, result)
+            ci_result = await self._wait_for_ci(branch.name, context, result, project_context)
             if not ci_result:
                 return result
 
@@ -223,7 +235,8 @@ class TicketProcessor:
 
         return checks
 
-    async def _run_quality_gate(self, context: IssueContext, agent_result) -> bool:
+    async def _run_quality_gate(self, context: IssueContext, agent_result,
+                               project_context: str = "") -> bool:
         """Run quality checks and feed failures back to agent for fixing.
 
         Returns True if all checks pass (or no checks configured).
@@ -252,7 +265,7 @@ class TicketProcessor:
 
             # Feed failures back to agent for fixing
             fix_result = await self.agent.run_fix_quality(
-                context, failure_text,
+                context, failure_text, project_context=project_context,
             )
 
             if fix_result.error:
@@ -380,6 +393,7 @@ Please investigate and remove the `{self.config.label_blocked}` label to allow a
         branch: str,
         context: IssueContext,
         result: ProcessingResult,
+        project_context: str = "",
     ) -> bool:
         """Wait for CI to complete, attempt fixes if needed. Returns True if CI passed."""
         ci_attempts = 0
@@ -418,7 +432,9 @@ Please investigate and remove the `{self.config.label_blocked}` label to allow a
                     return False
 
                 print(f"    Attempting to fix CI failures...")
-                fix_result = await self.agent.run_fix_ci(context, status.failure_summary())
+                fix_result = await self.agent.run_fix_ci(
+                    context, status.failure_summary(), project_context=project_context,
+                )
 
                 if fix_result.blocked:
                     self._handle_blocked(result, context, fix_result.blocking_question)

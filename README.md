@@ -1,6 +1,6 @@
 # AutoClaude
 
-Autonomous GitHub issue processor powered by Claude. Picks up issues, implements changes, runs quality checks, and opens PRs — all without human intervention.
+Autonomous GitHub and Azure DevOps issue processor powered by Claude. Picks up issues, implements changes, runs quality checks, and opens PRs — all without human intervention.
 
 ## Install
 
@@ -17,17 +17,27 @@ uv pip install -e /path/to/autoclaude
 ## Environment Variables
 
 ```bash
-GITHUB_TOKEN=ghp_...           # GitHub PAT with repo access (required)
-ANTHROPIC_API_KEY=sk-ant-...   # Claude API key (optional if logged in via `claude login`)
+# GitHub (required for --platform github)
+GITHUB_TOKEN=ghp_...           # GitHub PAT with repo access
 GITHUB_BOT_ASSIGNEE=claude-bot # Bot username for claiming (optional)
 GITHUB_HUMAN_REVIEWER=username # Human fallback for blocked issues (optional)
+
+# Azure DevOps (required for --platform azuredevops)
+ADO_ORG=MyOrg                  # ADO organization name
+ADO_PROJECT=MyProject          # ADO project name
+ADO_REPO=my-repo               # ADO repository name
+
+# Claude auth (optional — defaults to OAuth via `claude login`)
+ANTHROPIC_API_KEY=sk-ant-...   # Only needed with --use-api-key
 ```
 
 Variables can be set in a `.env` file in the project root (loaded automatically via dotenv). The git repo root `.env` is also checked, so worktree invocations inherit the main project's env.
 
-If `ANTHROPIC_API_KEY` is not set, the Claude CLI falls back to OAuth authentication (Max plan token from `claude login`).
+By default, AutoClaude uses OAuth authentication via `claude login` (Max plan tokens). Pass `--use-api-key` to use `ANTHROPIC_API_KEY` for billing instead.
 
 ## Quick Start
+
+### GitHub
 
 ```bash
 # Process a specific issue
@@ -47,6 +57,19 @@ autoclaude claim --repo owner/repo --dry-run
 
 # Process all issues with a specific label
 autoclaude claim --repo owner/repo --label bug
+```
+
+### Azure DevOps
+
+```bash
+# Process a specific work item
+autoclaude claim --platform azuredevops --ado-org MapLarge --ado-project "Data Science" --ado-repo my-repo --issue 183
+
+# Or use environment variables (ADO_ORG, ADO_PROJECT, ADO_REPO)
+autoclaude claim --platform azuredevops --issue 183
+
+# Process all claimable work items with a tag
+autoclaude claim --platform azuredevops --label enhancement
 ```
 
 ## Quality Gates
@@ -128,7 +151,7 @@ Skip with `--no-context` or override the discovery root with `--context-dir`.
 
 ## Permission Guard
 
-AutoClaude uses Claude Agent SDK **PreToolUse hooks** instead of `bypassPermissions`. This means it works with both API key auth and OAuth/Max plan auth — no `ANTHROPIC_API_KEY` required. Use `--oauth` to explicitly strip API keys and force OAuth.
+AutoClaude uses Claude Agent SDK **PreToolUse hooks** instead of `bypassPermissions`. This means it works with both API key auth and OAuth/Max plan auth — no `ANTHROPIC_API_KEY` required.
 
 The orchestrator acts as the security gate, auto-approving safe operations and blocking dangerous ones:
 
@@ -183,6 +206,7 @@ Common flags (all commands):
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--platform` | `github` | Ticket platform: `github` or `azuredevops` |
 | `--model` | `sonnet` | Claude model: opus, sonnet, haiku |
 | `--dry-run` | off | Preview without making changes |
 | `--max-turns` | 50 | Max agent turns per iteration |
@@ -191,7 +215,17 @@ Common flags (all commands):
 | `--verbose` | off | Stream agent actions to stderr |
 | `--quality-check` | none | Shell command quality gate (repeatable) |
 | `--max-quality-retries` | 2 | Retry limit for quality fix attempts |
-| `--oauth` | off | Force OAuth auth (strips API keys) |
+| `--use-api-key` | off | Use ANTHROPIC_API_KEY for billing (default: OAuth) |
+| `--skip-clarification` | off | Skip issue analysis/clarification phase |
+| `--cli-path` | auto-detect | Path to claude CLI binary |
+
+ADO-specific flags:
+
+| Flag | Env Var | Description |
+|------|---------|-------------|
+| `--ado-org` | `ADO_ORG` | Azure DevOps organization |
+| `--ado-project` | `ADO_PROJECT` | Azure DevOps project |
+| `--ado-repo` | `ADO_REPO` | Azure DevOps repository name |
 
 ## License
 

@@ -11,6 +11,7 @@ from github.Repository import Repository
 
 from .config import AutoClaudeConfig
 from .models import BranchInfo, CIStatus, IssueComment, IssueContext
+from .platform import WorkItem
 
 
 class GitHubClient:
@@ -27,15 +28,15 @@ class GitHubClient:
             self._repo = self._github.get_repo(self.config.repo)
         return self._repo
 
-    def get_assigned_issues(self) -> list[Issue]:
+    def get_assigned_issues(self) -> list[WorkItem]:
         """Get all open issues assigned to the bot."""
         issues = self.repo.get_issues(
             state="open",
             assignee=self.config.bot_assignee,
         )
-        return list(issues)
+        return [WorkItem(number=i.number, title=i.title, raw=i) for i in issues]
 
-    def get_claimable_issues(self, require_label: str = "enhancement") -> list[Issue]:
+    def get_claimable_issues(self, require_label: str = "enhancement") -> list[WorkItem]:
         """Get open issues that can be claimed by an agent.
 
         Returns issues that have the required label but NOT agent-claimed/blocked/complete.
@@ -52,27 +53,30 @@ class GitHubClient:
         for issue in issues:
             issue_labels = {label.name for label in issue.labels}
             if not issue_labels.intersection(agent_labels):
-                claimable.append(issue)
+                claimable.append(WorkItem(number=issue.number, title=issue.title, raw=issue))
 
         return claimable
 
-    def get_issues_with_label(self, label: str) -> list[Issue]:
+    def get_issues_with_label(self, label: str) -> list[WorkItem]:
         """Get all open issues with a specific label."""
         issues = self.repo.get_issues(state="open", labels=[label])
-        return list(issues)
+        return [WorkItem(number=i.number, title=i.title, raw=i) for i in issues]
 
     def is_claimed(self, issue_number: int) -> bool:
         """Check if an issue is already claimed by an agent."""
-        issue = self.get_issue(issue_number)
+        item = self.get_issue(issue_number)
+        issue = item.raw
         issue_labels = {label.name for label in issue.labels}
         return self.config.label_in_progress in issue_labels
 
-    def get_issue(self, issue_number: int) -> Issue:
+    def get_issue(self, issue_number: int) -> WorkItem:
         """Get a specific issue by number."""
-        return self.repo.get_issue(issue_number)
+        issue = self.repo.get_issue(issue_number)
+        return WorkItem(number=issue.number, title=issue.title, raw=issue)
 
-    def build_issue_context(self, issue: Issue) -> IssueContext:
+    def build_issue_context(self, item: WorkItem) -> IssueContext:
         """Build full context from an issue for processing."""
+        issue = item.raw
         comments = []
         for comment in issue.get_comments():
             comments.append(IssueComment(
@@ -146,25 +150,29 @@ class GitHubClient:
         matches = re.findall(r'(?:issue\s*#?|fixes\s*#?|closes\s*#?|relates?\s*to\s*#?)(\d+)', all_text, re.IGNORECASE)
         return sorted(set(int(m) for m in matches if int(m) != context.number))
 
+    def _get_raw_issue(self, issue_number: int) -> Issue:
+        """Get raw GitHub Issue object for API operations."""
+        return self.repo.get_issue(issue_number)
+
     def add_comment(self, issue_number: int, body: str) -> None:
         if self.config.dry_run:
             print(f"[DRY RUN] Would add comment to #{issue_number}:\n{body[:200]}...")
             return
-        issue = self.get_issue(issue_number)
+        issue = self._get_raw_issue(issue_number)
         issue.create_comment(body)
 
     def add_label(self, issue_number: int, label: str) -> None:
         if self.config.dry_run:
             print(f"[DRY RUN] Would add label '{label}' to #{issue_number}")
             return
-        issue = self.get_issue(issue_number)
+        issue = self._get_raw_issue(issue_number)
         issue.add_to_labels(label)
 
     def remove_label(self, issue_number: int, label: str) -> None:
         if self.config.dry_run:
             print(f"[DRY RUN] Would remove label '{label}' from #{issue_number}")
             return
-        issue = self.get_issue(issue_number)
+        issue = self._get_raw_issue(issue_number)
         try:
             issue.remove_from_labels(label)
         except Exception:
@@ -174,7 +182,7 @@ class GitHubClient:
         if self.config.dry_run:
             print(f"[DRY RUN] Would set assignees on #{issue_number}: {assignees}")
             return
-        issue = self.get_issue(issue_number)
+        issue = self._get_raw_issue(issue_number)
         for assignee in issue.assignees:
             issue.remove_from_assignees(assignee)
         for assignee in assignees:

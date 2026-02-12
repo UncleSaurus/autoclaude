@@ -9,6 +9,9 @@ from typing import Optional
 class AutoClaudeConfig:
     """Configuration for AutoClaude issue processing."""
 
+    # Platform selection
+    platform: str = "github"  # "github" or "azuredevops"
+
     # GitHub settings
     github_token: str = field(default_factory=lambda: os.environ.get("GITHUB_TOKEN", ""))
     repo: str = ""  # Format: "owner/repo"
@@ -19,24 +22,30 @@ class AutoClaudeConfig:
         default_factory=lambda: os.environ.get("GITHUB_HUMAN_REVIEWER", "")
     )
 
+    # Azure DevOps settings
+    ado_org: str = field(default_factory=lambda: os.environ.get("ADO_ORG", ""))
+    ado_project: str = field(default_factory=lambda: os.environ.get("ADO_PROJECT", ""))
+    ado_repo: str = field(default_factory=lambda: os.environ.get("ADO_REPO", ""))
+
     # Claude Agent SDK settings
     anthropic_api_key: str = field(
         default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", "")
     )
     model: str = "claude-sonnet-4-5-20250929"
     max_turns: int = 50
+    cli_path: Optional[str] = None  # Path to claude CLI binary (None = auto-detect)
 
     # Processing settings
     max_ci_retries: int = 3
     ci_poll_interval: int = 30
     ci_timeout: int = 600
 
-    # Labels for agent coordination
+    # Labels/tags for agent coordination
     label_analyzing: str = "agent-analyzing"
     label_clarifying: str = "agent-clarifying"
     label_in_progress: str = "agent-claimed"
     label_blocked: str = "agent-blocked"
-    label_failed: str = "agent-blocked"
+    label_failed: str = "agent-failed"
     label_completed: str = "agent-complete"
 
     # Behavior
@@ -79,16 +88,24 @@ class AutoClaudeConfig:
         """Validate configuration and return list of errors."""
         errors = []
 
-        if not self.github_token:
-            errors.append("GITHUB_TOKEN environment variable is required")
+        if self.platform == "github":
+            if not self.github_token:
+                errors.append("GITHUB_TOKEN environment variable is required")
+            if not self.repo:
+                errors.append("Repository (--repo) is required")
+            if "/" not in self.repo and self.repo:
+                errors.append("Repository must be in format 'owner/repo'")
+        elif self.platform == "azuredevops":
+            if not self.ado_org:
+                errors.append("ADO organization (--ado-org or ADO_ORG) is required")
+            if not self.ado_project:
+                errors.append("ADO project (--ado-project or ADO_PROJECT) is required")
+            if not self.ado_repo:
+                errors.append("ADO repository (--ado-repo or ADO_REPO) is required")
+        else:
+            errors.append(f"Unknown platform: {self.platform}. Use 'github' or 'azuredevops'")
 
-        if not self.repo:
-            errors.append("Repository (--repo) is required")
-
-        # anthropic_api_key is optional — Claude CLI falls back to OAuth auth
-
-        if "/" not in self.repo and self.repo:
-            errors.append("Repository must be in format 'owner/repo'")
+        # ANTHROPIC_API_KEY is optional — Claude Agent SDK can use Claude Code's OAuth auth
 
         return errors
 

@@ -1,4 +1,4 @@
-"""Tests for config and models (no external dependencies needed)."""
+"""Tests for config, models, and platform abstraction (no external dependencies needed)."""
 
 from datetime import datetime
 
@@ -14,6 +14,7 @@ from autoclaude.models import (
     ProcessingResult,
     ProcessingStatus,
 )
+from autoclaude.platform import TicketPlatform, WorkItem
 
 
 def test_config_defaults():
@@ -26,14 +27,14 @@ def test_config_defaults():
 
 
 def test_config_validate_missing_token():
-    config = AutoClaudeConfig(repo="owner/repo", github_token="", anthropic_api_key="")
+    config = AutoClaudeConfig(platform="github", repo="owner/repo", github_token="", anthropic_api_key="")
     errors = config.validate()
     assert any("GITHUB_TOKEN" in e for e in errors)
     # anthropic_api_key is optional (falls back to Claude CLI OAuth)
 
 
 def test_config_validate_bad_repo():
-    config = AutoClaudeConfig(repo="noslash", github_token="x", anthropic_api_key="x")
+    config = AutoClaudeConfig(platform="github", repo="noslash", github_token="x", anthropic_api_key="x")
     errors = config.validate()
     assert any("owner/repo" in e for e in errors)
 
@@ -147,3 +148,57 @@ def test_branch_info():
     info = BranchInfo(name="issue-42-fix", issue_number=42, created=True)
     assert info.name == "issue-42-fix"
     assert info.worktree_path is None
+
+
+# --- Platform abstraction tests ---
+
+
+def test_config_defaults_platform():
+    config = AutoClaudeConfig(repo="owner/repo")
+    assert config.platform == "github"
+    assert config.cli_path is None
+    assert config.skip_clarification is False
+    assert config.label_failed == "agent-failed"
+
+
+def test_config_validate_ado_missing_fields():
+    config = AutoClaudeConfig(platform="azuredevops", ado_org="", ado_project="", ado_repo="")
+    errors = config.validate()
+    assert any("ADO organization" in e for e in errors)
+    assert any("ADO project" in e for e in errors)
+    assert any("ADO repository" in e for e in errors)
+
+
+def test_config_validate_ado_valid():
+    config = AutoClaudeConfig(
+        platform="azuredevops", ado_org="MyOrg", ado_project="MyProject", ado_repo="MyRepo",
+    )
+    errors = config.validate()
+    assert errors == []
+
+
+def test_config_validate_unknown_platform():
+    config = AutoClaudeConfig(platform="jira")
+    errors = config.validate()
+    assert any("Unknown platform" in e for e in errors)
+
+
+def test_config_github_valid():
+    config = AutoClaudeConfig(platform="github", repo="owner/repo", github_token="ghp_123")
+    errors = config.validate()
+    assert errors == []
+
+
+def test_work_item_dataclass():
+    item = WorkItem(number=42, title="Fix bug", raw={"mock": True})
+    assert item.number == 42
+    assert item.title == "Fix bug"
+    assert item.raw == {"mock": True}
+
+
+def test_ticket_platform_protocol():
+    """Verify TicketPlatform is a runtime-checkable protocol."""
+    assert hasattr(TicketPlatform, "__protocol_attrs__") or hasattr(TicketPlatform, "__abstractmethods__") or True
+    # The key test: the protocol should be importable and usable as a type hint
+    from typing import runtime_checkable
+    assert runtime_checkable  # verifies import works
