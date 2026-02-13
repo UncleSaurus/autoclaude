@@ -1,5 +1,6 @@
 """Claude Agent SDK integration for autonomous code execution."""
 
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -11,6 +12,16 @@ from .config import AutoClaudeConfig
 from .models import ClarificationOption, ClarificationQuestion, ClarificationRequest, IssueContext
 from .permission_guard import build_hooks
 from .progress import is_complete
+
+
+def _clean_env() -> dict[str, str]:
+    """Build a clean environment for Claude CLI subprocess.
+
+    Strips CLAUDECODE to allow launching Claude CLI from within a Claude Code
+    session (claude-agent-sdk copies os.environ into the subprocess, and the
+    CLI refuses to start when it detects a parent Claude Code process).
+    """
+    return {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
 
 @dataclass
@@ -163,6 +174,7 @@ Begin by reading any referenced files to understand the current state, then impl
             system_prompt=self._build_system_prompt(project_context),
             setting_sources=["user", "project", "local"],
             cli_path=self.config.cli_path,
+            env=_clean_env(),
         )
         return await self._run_client(prompt, options)
 
@@ -220,6 +232,7 @@ Analyze the issue now and provide your assessment.
                 system_prompt=self._build_system_prompt(project_context),
                 setting_sources=["user", "project", "local"],
                 cli_path=self.config.cli_path,
+                env=_clean_env(),
             )
 
             result = await self._run_client(prompt, options)
@@ -345,6 +358,7 @@ Begin by understanding the failure, then implement fixes.
             system_prompt=self._build_system_prompt(project_context),
             setting_sources=["user", "project", "local"],
             cli_path=self.config.cli_path,
+            env=_clean_env(),
         )
         return await self._run_client(prompt, options)
 
