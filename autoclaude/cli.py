@@ -115,6 +115,42 @@ PRD format (prd.json):
     multi_parser.add_argument("--repos", nargs="+", required=True, help="Repositories to process")
     multi_parser.add_argument("--upstream", nargs="*", default=[], help="Upstream repositories")
 
+    # DAG command
+    dag_parser = subparsers.add_parser(
+        "dag",
+        help="Dependency-aware batch processing with merge queue",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  autoclaude dag --tickets 197,198,199,200 --deps "197:200,198:197" --repo owner/repo
+  autoclaude dag --tickets 10,11,12 --repo owner/repo --max-parallel 3
+  autoclaude dag --tickets 10,11 --no-pr --test-command "pytest"
+
+Dependency format:
+  --deps "A:B" means ticket A depends on ticket B.
+  --deps "A:B,C:A" means A depends on B, C depends on A.
+  Tickets without dependencies run in the earliest wave.
+""",
+    )
+    _add_common_args(dag_parser)
+    dag_parser.add_argument("--repo", help="GitHub repository (owner/repo)")
+    dag_parser.add_argument(
+        "--tickets", required=True,
+        help="Comma-separated ticket numbers (e.g., 197,198,199)",
+    )
+    dag_parser.add_argument(
+        "--deps", default="",
+        help='Dependency spec: "A:B,C:A" means A depends on B, C on A',
+    )
+    dag_parser.add_argument(
+        "--max-parallel", type=int, default=4,
+        help="Max parallel tickets per wave (default: 4)",
+    )
+    dag_parser.add_argument(
+        "--test-command", default=None,
+        help="Shell command to run as post-merge validation",
+    )
+
     return parser
 
 
@@ -155,6 +191,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
                         help="Use ANTHROPIC_API_KEY for billing instead of OAuth/Max plan tokens")
     parser.add_argument("--cli-path", default=None,
                         help="Path to claude CLI binary (default: auto-detect native install)")
+    parser.add_argument("--no-pr", action="store_true", help="Skip PR creation")
     parser.add_argument(
         "--quality-check", action="append", default=[], dest="quality_checks",
         help="Shell command to run as quality gate after agent (repeatable)",
@@ -203,15 +240,15 @@ def validate_env(platform: str = "github", *, use_api_key: bool = False) -> tupl
 
     if errors:
         for error in errors:
-            print(f"Error: {error}", file=sys.stderr)
+            print(f"Error: {error}", file=sys.stderr, flush=True)
         sys.exit(1)
 
     if use_api_key:
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not anthropic_key:
-            print("Warning: --use-api-key specified but ANTHROPIC_API_KEY not set", file=sys.stderr)
+            print("Warning: --use-api-key specified but ANTHROPIC_API_KEY not set", file=sys.stderr, flush=True)
         else:
-            print("Using ANTHROPIC_API_KEY for billing", file=sys.stderr)
+            print("Using ANTHROPIC_API_KEY for billing", file=sys.stderr, flush=True)
         return github_token, anthropic_key
 
     # Default: strip API key AND auth token so the SDK falls back to
@@ -220,7 +257,7 @@ def validate_env(platform: str = "github", *, use_api_key: bool = False) -> tupl
     # the live OAuth session.
     os.environ.pop("ANTHROPIC_API_KEY", None)
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-    print("Using OAuth/Max plan auth (pass --use-api-key to use API billing)", file=sys.stderr)
+    print("Using OAuth/Max plan auth (pass --use-api-key to use API billing)", file=sys.stderr, flush=True)
     return github_token, ""
 
 
@@ -231,13 +268,23 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
     if not cli_path:
         cli_path = _detect_native_claude_cli()
         if cli_path:
-            print(f"Auto-detected native Claude CLI: {cli_path}", file=sys.stderr)
+            print(f"Auto-detected native Claude CLI: {cli_path}", file=sys.stderr, flush=True)
+
+    # Auto-detect repo from git remote if not specified
+    repo_val = repo or getattr(args, "repo", "") or ""
+    if not repo_val and args.platform == "github":
+        repo_val = AutoClaudeConfig.detect_repo_from_remote(
+            getattr(args, "remote", "origin"),
+            cwd=getattr(args, "repo_dir", None),
+        )
+        if repo_val:
+            print(f"Auto-detected repo: {repo_val}", file=sys.stderr, flush=True)
 
     return AutoClaudeConfig(
         platform=args.platform,
         github_token=github_token,
         anthropic_api_key=anthropic_key,
-        repo=repo or getattr(args, "repo", "") or "",
+        repo=repo_val,
         bot_assignee=args.assignee,
         human_reviewer=args.reviewer,
         model=MODEL_IDS[args.model],
@@ -255,6 +302,7 @@ def make_config(args: argparse.Namespace, github_token: str, anthropic_key: str,
         verbose=getattr(args, "verbose", False),
         quality_checks=getattr(args, "quality_checks", []),
         max_quality_retries=getattr(args, "max_quality_retries", 2),
+        skip_pr=getattr(args, "no_pr", False),
         ado_org=args.ado_org,
         ado_project=args.ado_project,
         ado_repo=args.ado_repo,
@@ -270,24 +318,24 @@ async def cmd_claim(args: argparse.Namespace) -> int:
     errors = config.validate()
     if errors:
         for error in errors:
-            print(f"Error: {error}", file=sys.stderr)
+            print(f"Error: {error}", file=sys.stderr, flush=True)
         return 1
 
     processor = TicketProcessor(config)
     target = config.repo or f"{config.ado_org}/{config.ado_project}"
-    print(f"Session: {processor.session_id}")
+    print(f"Session: {processor.session_id}", flush=True)
     if config.max_iterations > 1:
-        print(f"Max iterations: {config.max_iterations}")
+        print(f"Max iterations: {config.max_iterations}", flush=True)
 
     if config.issue_number:
         if processor.github.is_claimed(config.issue_number):
-            print(f"Issue #{config.issue_number} is already claimed")
+            print(f"Issue #{config.issue_number} is already claimed", flush=True)
             return 1
-        print(f"Claiming issue #{config.issue_number} in {target}...")
+        print(f"Claiming issue #{config.issue_number} in {target}...", flush=True)
         result = await processor.process_single(config.issue_number)
         results = [result]
     else:
-        print(f"Finding claimable issues in {target} with label '{args.label}'...")
+        print(f"Finding claimable issues in {target} with label '{args.label}'...", flush=True)
         results = await processor.process_claimable(args.label)
 
     _print_summary(results)
@@ -302,18 +350,18 @@ async def cmd_process(args: argparse.Namespace) -> int:
     errors = config.validate()
     if errors:
         for error in errors:
-            print(f"Error: {error}", file=sys.stderr)
+            print(f"Error: {error}", file=sys.stderr, flush=True)
         return 1
 
     processor = TicketProcessor(config)
     target = config.repo or f"{config.ado_org}/{config.ado_project}"
 
     if config.issue_number:
-        print(f"Processing issue #{config.issue_number} in {target}...")
+        print(f"Processing issue #{config.issue_number} in {target}...", flush=True)
         result = await processor.process_single(config.issue_number)
         results = [result]
     else:
-        print(f"Processing all assigned issues in {target}...")
+        print(f"Processing all assigned issues in {target}...", flush=True)
         results = await processor.process_all_assigned()
 
     _print_summary(results)
@@ -326,12 +374,12 @@ async def cmd_batch(args: argparse.Namespace) -> int:
     config = make_config(args, github_token, anthropic_key, repo="")
 
     loop = IterationLoop(config)
-    print(f"Running batch from {args.prd} (max {args.max_iterations} iterations)...")
+    print(f"Running batch from {args.prd} (max {args.max_iterations} iterations)...", flush=True)
 
     results = await loop.run_batch_loop(args.prd, max_iterations=args.max_iterations)
 
     completed = sum(1 for r in results if r.success)
-    print(f"\nBatch complete: {completed}/{len(results)} stories succeeded")
+    print(f"\nBatch complete: {completed}/{len(results)} stories succeeded", flush=True)
 
     return 0 if all(r.success for r in results) else 1
 
@@ -351,11 +399,11 @@ async def cmd_orchestrate(args: argparse.Namespace) -> int:
 
     if args.issue:
         if args.repo == "all":
-            print("Error: --issue requires --repo to be 'upstream' or 'downstream'", file=sys.stderr)
+            print("Error: --issue requires --repo to be 'upstream' or 'downstream'", file=sys.stderr, flush=True)
             return 1
         repo = args.upstream_repo if args.repo == "upstream" else args.downstream_repo
         if not repo:
-            print("Error: downstream repo not specified", file=sys.stderr)
+            print("Error: downstream repo not specified", file=sys.stderr, flush=True)
             return 1
         result = await orchestrator.process_issue(repo, args.issue)
     elif args.repo == "all":
@@ -363,11 +411,11 @@ async def cmd_orchestrate(args: argparse.Namespace) -> int:
     else:
         repo = args.upstream_repo if args.repo == "upstream" else args.downstream_repo
         if not repo:
-            print("Error: downstream repo not specified", file=sys.stderr)
+            print("Error: downstream repo not specified", file=sys.stderr, flush=True)
             return 1
         result = await orchestrator.process_repo(repo)
 
-    print(result.summary())
+    print(result.summary(), flush=True)
 
     for results in result.results_by_repo.values():
         if any(r.status == ProcessingStatus.FAILED for r in results):
@@ -405,7 +453,7 @@ async def cmd_multi(args: argparse.Namespace) -> int:
     )
 
     result = await orchestrator.process_all()
-    print(result.summary())
+    print(result.summary(), flush=True)
 
     for results in result.results_by_repo.values():
         if any(r.status == ProcessingStatus.FAILED for r in results):
@@ -413,25 +461,70 @@ async def cmd_multi(args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_dag(args: argparse.Namespace) -> int:
+    """Handle the 'dag' command for dependency-aware batch processing."""
+    from .dag import CycleError, DAGProcessor, parse_deps
+
+    github_token, anthropic_key = validate_env(args.platform, use_api_key=args.use_api_key)
+    config = make_config(args, github_token, anthropic_key, repo=getattr(args, "repo", "") or "")
+    config.max_parallel = args.max_parallel
+    config.test_command = args.test_command
+    # DAG always uses worktrees for isolation
+    config.use_worktree = True
+
+    errors = config.validate()
+    if errors:
+        for error in errors:
+            print(f"Error: {error}", file=sys.stderr, flush=True)
+        return 1
+
+    # Parse tickets
+    tickets = [int(t.strip()) for t in args.tickets.split(",") if t.strip()]
+    if not tickets:
+        print("Error: --tickets must specify at least one ticket number", file=sys.stderr, flush=True)
+        return 1
+
+    try:
+        deps = parse_deps(args.deps)
+    except ValueError as e:
+        print(f"Error parsing --deps: {e}", file=sys.stderr, flush=True)
+        return 1
+
+    processor = DAGProcessor(config)
+    try:
+        result = await processor.run(tickets, deps)
+    except CycleError as e:
+        print(f"Error: {e}", file=sys.stderr, flush=True)
+        return 1
+
+    print(result.summary(), flush=True)
+
+    if any(r.status == ProcessingStatus.FAILED for r in result.results_by_ticket.values()):
+        return 1
+    if result.test_passed is False:
+        return 1
+    return 0
+
+
 def _print_summary(results: list) -> None:
-    print("\n" + "=" * 50)
-    print("PROCESSING SUMMARY")
-    print("=" * 50)
+    print("\n" + "=" * 50, flush=True)
+    print("PROCESSING SUMMARY", flush=True)
+    print("=" * 50, flush=True)
 
     completed = sum(1 for r in results if r.status == ProcessingStatus.COMPLETED)
     blocked = sum(1 for r in results if r.status == ProcessingStatus.BLOCKED)
     failed = sum(1 for r in results if r.status == ProcessingStatus.FAILED)
 
-    print(f"Total: {len(results)} | Completed: {completed} | Blocked: {blocked} | Failed: {failed}")
+    print(f"Total: {len(results)} | Completed: {completed} | Blocked: {blocked} | Failed: {failed}", flush=True)
 
     for result in results:
-        print(f"\n  #{result.issue_number}: {result.status.value}")
+        print(f"\n  #{result.issue_number}: {result.status.value}", flush=True)
         if result.pr_url:
-            print(f"    PR: {result.pr_url}")
+            print(f"    PR: {result.pr_url}", flush=True)
         if result.blocking_question:
-            print(f"    Blocked: {result.blocking_question}")
+            print(f"    Blocked: {result.blocking_question}", flush=True)
         if result.error_message:
-            print(f"    Error: {result.error_message}")
+            print(f"    Error: {result.error_message}", flush=True)
 
 
 def main() -> None:
@@ -448,7 +541,7 @@ def main() -> None:
         load_dotenv(Path(repo_dir) / ".env", override=False)
 
     if args.dry_run:
-        print("DRY RUN MODE\n")
+        print("DRY RUN MODE\n", flush=True)
 
     commands = {
         "claim": cmd_claim,
@@ -456,6 +549,7 @@ def main() -> None:
         "batch": cmd_batch,
         "orchestrate": cmd_orchestrate,
         "multi": cmd_multi,
+        "dag": cmd_dag,
     }
 
     handler = commands.get(args.command)

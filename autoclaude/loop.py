@@ -107,7 +107,7 @@ class IterationLoop:
         last_result: Optional[AgentResult] = None
 
         for iteration in range(1, max_iter + 1):
-            print(f"  Iteration {iteration}/{max_iter}")
+            print(f"  Iteration {iteration}/{max_iter}", flush=True)
 
             # Load fresh context each iteration
             project_context = ""
@@ -152,19 +152,19 @@ class IterationLoop:
 
             # Check termination conditions
             if is_complete(result.output):
-                print(f"  Agent signaled completion at iteration {iteration}")
+                print(f"  Agent signaled completion at iteration {iteration}", flush=True)
                 break
 
             if is_blocked(result.output):
-                print(f"  Agent blocked at iteration {iteration}: {result.blocking_question}")
+                print(f"  Agent blocked at iteration {iteration}: {result.blocking_question}", flush=True)
                 break
 
             if result.error:
-                print(f"  Agent error at iteration {iteration}: {result.error}")
+                print(f"  Agent error at iteration {iteration}: {result.error}", flush=True)
                 break
 
             if not result.success:
-                print(f"  Agent failed at iteration {iteration}")
+                print(f"  Agent failed at iteration {iteration}", flush=True)
                 break
 
         return last_result or AgentResult(success=False, error="No iterations ran")
@@ -195,13 +195,13 @@ class IterationLoop:
                 continue
 
             if iterations_used >= max_iter:
-                print(f"  Max iterations ({max_iter}) reached, stopping batch")
+                print(f"  Max iterations ({max_iter}) reached, stopping batch", flush=True)
                 break
 
             iterations_used += 1
             story_id = story.get("id", "?")
             story_title = story.get("title", "Untitled")
-            print(f"\n  Story {story_id}: {story_title} (iteration {iterations_used}/{max_iter})")
+            print(f"\n  Story {story_id}: {story_title} (iteration {iterations_used}/{max_iter})", flush=True)
 
             # Build context for this story
             project_context = ""
@@ -251,12 +251,12 @@ class IterationLoop:
             if is_complete(result.output):
                 story["done"] = True
                 _save_prd(prd_path, prd)
-                print(f"  Story {story_id} completed")
+                print(f"  Story {story_id} completed", flush=True)
             elif is_blocked(result.output):
-                print(f"  Story {story_id} blocked: {result.blocking_question}")
+                print(f"  Story {story_id} blocked: {result.blocking_question}", flush=True)
                 break
             elif result.error:
-                print(f"  Story {story_id} error: {result.error}")
+                print(f"  Story {story_id} error: {result.error}", flush=True)
                 break
 
         return results

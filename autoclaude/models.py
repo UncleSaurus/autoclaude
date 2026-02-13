@@ -254,3 +254,75 @@ class ClarificationRequest:
             f"*{self.ready_signal}*",
         ])
         return "\n".join(lines)
+
+
+# --- DAG models ---
+
+
+@dataclass
+class DAGNode:
+    """A ticket in the dependency graph."""
+
+    ticket_number: int
+    depends_on: list[int] = field(default_factory=list)
+    wave: int = -1  # assigned wave number (-1 = unassigned)
+
+
+@dataclass
+class DAGWave:
+    """A set of independent tickets that can be processed in parallel."""
+
+    wave_number: int
+    tickets: list[int]
+
+
+@dataclass
+class MergeConflict:
+    """File overlap between two branches in the same wave."""
+
+    ticket_a: int
+    ticket_b: int
+    overlapping_files: list[str]
+
+
+@dataclass
+class DAGResult:
+    """Result of processing an entire DAG."""
+
+    waves: list[DAGWave]
+    results_by_ticket: dict[int, ProcessingResult] = field(default_factory=dict)
+    merge_conflicts: list[MergeConflict] = field(default_factory=list)
+    test_passed: bool | None = None  # None = no test ran
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    def summary(self) -> str:
+        """Generate human-readable summary."""
+        lines = ["=" * 60, "DAG PROCESSING SUMMARY", "=" * 60]
+
+        for wave in self.waves:
+            lines.append(f"\nWave {wave.wave_number}:")
+            for ticket in wave.tickets:
+                result = self.results_by_ticket.get(ticket)
+                if result:
+                    lines.append(f"  #{ticket}: {result.status.value}")
+                    if result.branch_name:
+                        lines.append(f"    Branch: {result.branch_name}")
+                else:
+                    lines.append(f"  #{ticket}: SKIPPED (dependency failed)")
+
+        if self.merge_conflicts:
+            lines.append(f"\nFile overlap warnings: {len(self.merge_conflicts)}")
+            for mc in self.merge_conflicts:
+                lines.append(f"  #{mc.ticket_a} <-> #{mc.ticket_b}: {', '.join(mc.overlapping_files[:5])}")
+
+        if self.test_passed is not None:
+            lines.append(f"\nPost-merge test: {'PASSED' if self.test_passed else 'FAILED'}")
+
+        completed = sum(1 for r in self.results_by_ticket.values()
+                        if r.status == ProcessingStatus.COMPLETED)
+        failed = sum(1 for r in self.results_by_ticket.values()
+                     if r.status == ProcessingStatus.FAILED)
+        lines.append(f"\nTotal: {len(self.results_by_ticket)} | Completed: {completed} | Failed: {failed}")
+
+        return "\n".join(lines)

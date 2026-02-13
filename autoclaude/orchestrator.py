@@ -137,13 +137,13 @@ class Orchestrator:
     async def process_all(self) -> OrchestrationResult:
         result = OrchestrationResult(started_at=datetime.now())
 
-        print(f"Processing {len(self.repos)} repositories in order: {self.processing_order}")
+        print(f"Processing {len(self.repos)} repositories in order: {self.processing_order}", flush=True)
 
         for repo in self.processing_order:
             repo_config = self.repos[repo]
-            print(f"\n{'='*60}")
-            print(f"Processing: {repo}")
-            print(f"{'='*60}")
+            print(f"\n{'='*60}", flush=True)
+            print(f"Processing: {repo}", flush=True)
+            print(f"{'='*60}", flush=True)
 
             config = self._create_config_for_repo(repo_config)
             processor = TicketProcessor(config)
@@ -164,7 +164,7 @@ class Orchestrator:
         result = OrchestrationResult(started_at=datetime.now())
 
         if repo not in self.repos:
-            print(f"Repository {repo} not configured")
+            print(f"Repository {repo} not configured", flush=True)
             result.completed_at = datetime.now()
             return result
 
@@ -188,7 +188,7 @@ class Orchestrator:
         result = OrchestrationResult(started_at=datetime.now())
 
         if repo not in self.repos:
-            print(f"Repository {repo} not configured")
+            print(f"Repository {repo} not configured", flush=True)
             result.completed_at = datetime.now()
             return result
 
@@ -216,7 +216,7 @@ class Orchestrator:
         orchestration_result: OrchestrationResult,
     ) -> None:
         if self.dry_run:
-            print(f"[DRY RUN] Would check downstream impact on: {downstream_repos}")
+            print(f"[DRY RUN] Would check downstream impact on: {downstream_repos}", flush=True)
             return
 
         for downstream_repo in downstream_repos:
@@ -230,7 +230,7 @@ class Orchestrator:
             for result in completed_results:
                 if result.pr_url:
                     title = f"Review upstream change from {upstream_repo}#{result.issue_number}"
-                    print(f"Creating downstream issue in {downstream_repo}: {title}")
+                    print(f"Creating downstream issue in {downstream_repo}: {title}", flush=True)
 
 
 def create_multi_repo_orchestrator(

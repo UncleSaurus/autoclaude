@@ -58,18 +58,18 @@ class TicketProcessor:
         issues = self.github.get_claimable_issues(require_label)
         results = []
 
-        print(f"Found {len(issues)} claimable issues with label '{require_label}'")
+        print(f"Found {len(issues)} claimable issues with label '{require_label}'", flush=True)
 
         for issue in issues:
             if self.github.is_claimed(issue.number):
-                print(f"  Issue #{issue.number} was claimed by another agent, skipping")
+                print(f"  Issue #{issue.number} was claimed by another agent, skipping", flush=True)
                 continue
 
             context = self.github.build_issue_context(issue)
-            print(f"\nClaiming and processing issue #{context.number}: {context.title}")
+            print(f"\nClaiming and processing issue #{context.number}: {context.title}", flush=True)
             result = await self.process_issue(context)
             results.append(result)
-            print(f"Result: {result.status.value}")
+            print(f"Result: {result.status.value}", flush=True)
 
         return results
 
@@ -78,14 +78,14 @@ class TicketProcessor:
         issues = self.github.get_assigned_issues()
         results = []
 
-        print(f"Found {len(issues)} issues assigned to {self.config.bot_assignee}")
+        print(f"Found {len(issues)} issues assigned to {self.config.bot_assignee}", flush=True)
 
         for issue in issues:
             context = self.github.build_issue_context(issue)
-            print(f"\nProcessing issue #{context.number}: {context.title}")
+            print(f"\nProcessing issue #{context.number}: {context.title}", flush=True)
             result = await self.process_issue(context)
             results.append(result)
-            print(f"Result: {result.status.value}")
+            print(f"Result: {result.status.value}", flush=True)
 
         return results
 
@@ -115,11 +115,11 @@ class TicketProcessor:
 
             # Step 0: Clarification phase (unless skipped)
             if not skip_clarification:
-                print(f"  Analyzing issue for clarity...")
+                print(f"  Analyzing issue for clarity...", flush=True)
                 self._mark_analyzing(context.number)
 
                 if self.config.dry_run:
-                    print(f"  [DRY RUN] Would analyze issue #{context.number}")
+                    print(f"  [DRY RUN] Would analyze issue #{context.number}", flush=True)
                 else:
                     analysis = await self.agent.analyze_issue(context, project_context=project_context)
 
@@ -130,17 +130,17 @@ class TicketProcessor:
                         return self._request_clarification(result, context, analysis.clarification_request)
 
                     if analysis.implementation_plan:
-                        print(f"  Ready to implement: {analysis.implementation_plan[:100]}...")
+                        print(f"  Ready to implement: {analysis.implementation_plan[:100]}...", flush=True)
 
             # Step 1: Add in-progress label
             self._mark_in_progress(context.number)
 
             # Step 2: Create branch
-            print(f"  Creating branch for issue #{context.number}...")
+            print(f"  Creating branch for issue #{context.number}...", flush=True)
             branch = self.git.create_branch(context.number, context.title)
             result.branch_name = branch.name
             self._current_branch = branch.name
-            print(f"  Branch: {branch.name}")
+            print(f"  Branch: {branch.name}", flush=True)
 
             # Step 3: Optionally post plan comment
             if self.config.post_plan_comment:
@@ -148,19 +148,19 @@ class TicketProcessor:
 
             # Step 4: Run agent (skip in dry-run mode)
             if self.config.dry_run:
-                print(f"  [DRY RUN] Would run agent for issue #{context.number}")
-                print(f"  [DRY RUN] Issue: {context.title}")
-                print(f"  [DRY RUN] Context loaded: {bool(project_context)}")
+                print(f"  [DRY RUN] Would run agent for issue #{context.number}", flush=True)
+                print(f"  [DRY RUN] Issue: {context.title}", flush=True)
+                print(f"  [DRY RUN] Context loaded: {bool(project_context)}", flush=True)
                 result.status = ProcessingStatus.COMPLETED
                 result.completed_at = datetime.now()
                 return result
 
             # Use iteration loop if max_iterations > 1, otherwise single pass
             if self.config.max_iterations > 1:
-                print(f"  Running with up to {self.config.max_iterations} iterations...")
+                print(f"  Running with up to {self.config.max_iterations} iterations...", flush=True)
                 agent_result = await self.loop.run_issue_loop(context)
             else:
-                print(f"  Running agent...")
+                print(f"  Running agent...", flush=True)
                 agent_result = await self.agent.run(context, project_context=project_context)
 
             if agent_result.blocked:
@@ -196,18 +196,22 @@ class TicketProcessor:
                     result.commits.append(sha)
 
             # Step 8: Push and wait for CI
-            print(f"  Pushing branch and waiting for CI...")
+            print(f"  Pushing branch and waiting for CI...", flush=True)
             self.git.push_branch(branch.name)
 
             ci_result = await self._wait_for_ci(branch.name, context, result, project_context)
             if not ci_result:
                 return result
 
-            # Step 9: Create PR with descriptive body
-            print(f"  Creating pull request...")
-            pr_number, pr_url = self._create_pr(context, branch.name, summary)
-            result.pr_number = pr_number
-            result.pr_url = pr_url
+            # Step 9: Create PR with descriptive body (unless --no-pr)
+            pr_url = ""
+            if not self.config.skip_pr:
+                print(f"  Creating pull request...", flush=True)
+                pr_number, pr_url = self._create_pr(context, branch.name, summary)
+                result.pr_number = pr_number
+                result.pr_url = pr_url
+            else:
+                print(f"  Skipping PR creation (--no-pr)", flush=True)
 
             # Step 10: Update issue and clean up
             self._mark_completed(context.number, pr_url)
@@ -249,18 +253,18 @@ class TicketProcessor:
         cwd = self.config.worktree_path or "."
 
         for attempt in range(1, self.config.max_quality_retries + 1):
-            print(f"  Running quality checks (attempt {attempt}/{self.config.max_quality_retries})...")
+            print(f"  Running quality checks (attempt {attempt}/{self.config.max_quality_retries})...", flush=True)
             result = run_checks(checks, cwd=cwd, dry_run=self.config.dry_run)
 
             if result.passed:
-                print(f"  All quality checks passed!")
+                print(f"  All quality checks passed!", flush=True)
                 return True
 
             failure_text = result.failure_summary()
-            print(f"  Quality checks failed. Feeding back to agent...")
+            print(f"  Quality checks failed. Feeding back to agent...", flush=True)
 
             if attempt >= self.config.max_quality_retries:
-                print(f"  Max quality retries reached. Proceeding with failures.")
+                print(f"  Max quality retries reached. Proceeding with failures.", flush=True)
                 return False
 
             # Feed failures back to agent for fixing
@@ -269,11 +273,11 @@ class TicketProcessor:
             )
 
             if fix_result.error:
-                print(f"  Quality fix agent error: {fix_result.error}")
+                print(f"  Quality fix agent error: {fix_result.error}", flush=True)
                 return False
 
             if fix_result.blocked:
-                print(f"  Quality fix agent blocked: {fix_result.blocking_question}")
+                print(f"  Quality fix agent blocked: {fix_result.blocking_question}", flush=True)
                 return False
 
         return False
@@ -323,7 +327,7 @@ I'll update this issue when processing is complete or if I have questions."""
         self.github.remove_label(context.number, self.config.label_analyzing)
         self.github.add_label(context.number, self.config.label_clarifying)
 
-        print(f"  CLARIFYING: Posted {len(clarification.questions)} questions")
+        print(f"  CLARIFYING: Posted {len(clarification.questions)} questions", flush=True)
         return result
 
     def _handle_blocked(
@@ -353,7 +357,7 @@ Please respond to this question, then remove the `{self.config.label_blocked}` l
             new_assignees.append(self.config.human_reviewer)
         self.github.set_assignees(context.number, new_assignees)
 
-        print(f"  BLOCKED: {question}")
+        print(f"  BLOCKED: {question}", flush=True)
         return result
 
     def _handle_error(
@@ -385,7 +389,7 @@ Please investigate and remove the `{self.config.label_blocked}` label to allow a
             new_assignees.append(self.config.human_reviewer)
         self.github.set_assignees(context.number, new_assignees)
 
-        print(f"  FAILED: {error}")
+        print(f"  FAILED: {error}", flush=True)
         return result
 
     async def _wait_for_ci(
@@ -412,16 +416,16 @@ Please investigate and remove the `{self.config.label_blocked}` label to allow a
                 if not status.is_pending:
                     break
 
-                print(f"    CI status: {status.status}... waiting")
+                print(f"    CI status: {status.status}... waiting", flush=True)
                 await asyncio.sleep(self.config.ci_poll_interval)
 
             if status.is_success:
-                print(f"    CI passed!")
+                print(f"    CI passed!", flush=True)
                 return True
 
             if status.is_failure:
                 ci_attempts += 1
-                print(f"    CI failed (attempt {ci_attempts}/{self.config.max_ci_retries})")
+                print(f"    CI failed (attempt {ci_attempts}/{self.config.max_ci_retries})", flush=True)
 
                 if ci_attempts >= self.config.max_ci_retries:
                     self._handle_blocked(
@@ -431,7 +435,7 @@ Please investigate and remove the `{self.config.label_blocked}` label to allow a
                     )
                     return False
 
-                print(f"    Attempting to fix CI failures...")
+                print(f"    Attempting to fix CI failures...", flush=True)
                 fix_result = await self.agent.run_fix_ci(
                     context, status.failure_summary(), project_context=project_context,
                 )

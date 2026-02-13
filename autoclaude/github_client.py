@@ -156,21 +156,21 @@ class GitHubClient:
 
     def add_comment(self, issue_number: int, body: str) -> None:
         if self.config.dry_run:
-            print(f"[DRY RUN] Would add comment to #{issue_number}:\n{body[:200]}...")
+            print(f"[DRY RUN] Would add comment to #{issue_number}:\n{body[:200]}...", flush=True)
             return
         issue = self._get_raw_issue(issue_number)
         issue.create_comment(body)
 
     def add_label(self, issue_number: int, label: str) -> None:
         if self.config.dry_run:
-            print(f"[DRY RUN] Would add label '{label}' to #{issue_number}")
+            print(f"[DRY RUN] Would add label '{label}' to #{issue_number}", flush=True)
             return
         issue = self._get_raw_issue(issue_number)
         issue.add_to_labels(label)
 
     def remove_label(self, issue_number: int, label: str) -> None:
         if self.config.dry_run:
-            print(f"[DRY RUN] Would remove label '{label}' from #{issue_number}")
+            print(f"[DRY RUN] Would remove label '{label}' from #{issue_number}", flush=True)
             return
         issue = self._get_raw_issue(issue_number)
         try:
@@ -180,7 +180,7 @@ class GitHubClient:
 
     def set_assignees(self, issue_number: int, assignees: list[str]) -> None:
         if self.config.dry_run:
-            print(f"[DRY RUN] Would set assignees on #{issue_number}: {assignees}")
+            print(f"[DRY RUN] Would set assignees on #{issue_number}: {assignees}", flush=True)
             return
         issue = self._get_raw_issue(issue_number)
         for assignee in issue.assignees:
@@ -201,14 +201,14 @@ class GitHubClient:
         Returns (pr_number, pr_url).
         """
         if self.config.dry_run:
-            print(f"[DRY RUN] Would create PR: {title}")
+            print(f"[DRY RUN] Would create PR: {title}", flush=True)
             return (0, "https://github.com/dry-run/pr")
 
         # Check for existing PR on this branch before creating a duplicate.
         existing = list(self.repo.get_pulls(state="open", head=f"{self.repo.owner.login}:{head}"))
         if existing:
             pr = existing[0]
-            print(f"  PR #{pr.number} already exists for branch {head}, skipping creation")
+            print(f"  PR #{pr.number} already exists for branch {head}, skipping creation", flush=True)
             return (pr.number, pr.html_url)
 
         pr = self.repo.create_pull(
@@ -278,7 +278,7 @@ class GitOperations:
         cwd = self.worktree_path or self.config.repo_dir or None
         if self.config.dry_run:
             cwd_msg = f" (in {cwd})" if cwd else ""
-            print(f"[DRY RUN] Would run: {' '.join(cmd)}{cwd_msg}")
+            print(f"[DRY RUN] Would run: {' '.join(cmd)}{cwd_msg}", flush=True)
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return subprocess.run(cmd, capture_output=True, text=True, check=check, cwd=cwd)
 
@@ -316,7 +316,7 @@ class GitOperations:
         self.worktree_path = worktree_path
         self.config.worktree_path = worktree_path
 
-        print(f"Created worktree at: {worktree_path}")
+        print(f"Created worktree at: {worktree_path}", flush=True)
 
         return BranchInfo(
             name=branch_name,

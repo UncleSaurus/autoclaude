@@ -58,20 +58,20 @@ class AgentRunner:
         if hasattr(message, "content") and isinstance(message.content, list):
             for block in message.content:
                 if hasattr(block, "text"):
-                    print(f"\033[36m[agent]\033[0m {block.text}", file=sys.stderr)
+                    print(f"\033[36m[agent]\033[0m {block.text}", file=sys.stderr, flush=True)
                 elif hasattr(block, "name") and hasattr(block, "input"):
                     tool_input = block.input
                     # Truncate large inputs
                     preview = str(tool_input)
                     if len(preview) > 200:
                         preview = preview[:200] + "..."
-                    print(f"\033[33m[tool]\033[0m {block.name}({preview})", file=sys.stderr)
+                    print(f"\033[33m[tool]\033[0m {block.name}({preview})", file=sys.stderr, flush=True)
 
         # ResultMessage — final summary
         elif hasattr(message, "num_turns") and hasattr(message, "duration_ms"):
             secs = message.duration_ms / 1000
             cost = f" ${message.total_cost_usd:.4f}" if message.total_cost_usd else ""
-            print(f"\033[32m[done]\033[0m {message.num_turns} turns, {secs:.1f}s{cost}", file=sys.stderr)
+            print(f"\033[32m[done]\033[0m {message.num_turns} turns, {secs:.1f}s{cost}", file=sys.stderr, flush=True)
 
     def _build_prompt(self, context: IssueContext) -> str:
         """Build the prompt for Claude from issue context.

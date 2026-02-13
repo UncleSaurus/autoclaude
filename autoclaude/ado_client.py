@@ -76,7 +76,7 @@ class AdoClient:
         """Run an az CLI command and return the result."""
         cmd = ["az"] + list(args)
         if self.config.dry_run:
-            print(f"[DRY RUN] Would run: {' '.join(cmd)}")
+            print(f"[DRY RUN] Would run: {' '.join(cmd)}", flush=True)
             return subprocess.CompletedProcess(cmd, 0, "{}", "")
         result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if check and result.returncode != 0:
@@ -328,7 +328,7 @@ class AdoClient:
     def add_comment(self, issue_number: int, body: str) -> None:
         """Add a discussion comment to a work item."""
         if self.config.dry_run:
-            print(f"[DRY RUN] Would add comment to #{issue_number}:\n{body[:200]}...")
+            print(f"[DRY RUN] Would add comment to #{issue_number}:\n{body[:200]}...", flush=True)
             return
         self._run_az(
             "boards", "work-item", "update",
@@ -340,7 +340,7 @@ class AdoClient:
     def add_label(self, issue_number: int, label: str) -> None:
         """Add a tag to a work item. Side-effect: transitions state for agent tags."""
         if self.config.dry_run:
-            print(f"[DRY RUN] Would add tag '{label}' to #{issue_number}")
+            print(f"[DRY RUN] Would add tag '{label}' to #{issue_number}", flush=True)
             return
 
         tags = self._get_work_item_tags(issue_number)
@@ -361,7 +361,7 @@ class AdoClient:
     def remove_label(self, issue_number: int, label: str) -> None:
         """Remove a tag from a work item."""
         if self.config.dry_run:
-            print(f"[DRY RUN] Would remove tag '{label}' from #{issue_number}")
+            print(f"[DRY RUN] Would remove tag '{label}' from #{issue_number}", flush=True)
             return
 
         tags = self._get_work_item_tags(issue_number)
@@ -376,7 +376,7 @@ class AdoClient:
     def set_assignees(self, issue_number: int, assignees: list[str]) -> None:
         """Set the assigned-to field on a work item (ADO supports one assignee)."""
         if self.config.dry_run:
-            print(f"[DRY RUN] Would set assignee on #{issue_number}: {assignees}")
+            print(f"[DRY RUN] Would set assignee on #{issue_number}: {assignees}", flush=True)
             return
 
         assignee = assignees[0] if assignees else ""
@@ -397,7 +397,7 @@ class AdoClient:
     ) -> tuple[int, str]:
         """Create a pull request on ADO. Returns (pr_id, pr_url)."""
         if self.config.dry_run:
-            print(f"[DRY RUN] Would create PR: {title}")
+            print(f"[DRY RUN] Would create PR: {title}", flush=True)
             return (0, f"https://dev.azure.com/{self.org}/{self.project}/_git/{self.repo}/pullrequest/0")
 
         args = [

@@ -14,6 +14,7 @@ CLI (cli.py) → TicketProcessor (processor.py) → AgentRunner (agent.py)
                      ↓
               IterationLoop (loop.py) — multi-pass fresh-context iterations
               Orchestrator  (orchestrator.py) — multi-repo coordination
+              DAGProcessor  (dag.py) — dependency-aware parallel batch + merge queue
 ```
 
 ### Key modules
@@ -27,6 +28,7 @@ CLI (cli.py) → TicketProcessor (processor.py) → AgentRunner (agent.py)
 | `platform.py` | `TicketPlatform` protocol + `WorkItem` — platform abstraction layer |
 | `github_client.py` | `GitHubClient` (API via PyGithub) + `GitOperations` (subprocess git) |
 | `ado_client.py` | `AdoClient` (Azure DevOps via `az` CLI) — implements `TicketPlatform` |
+| `dag.py` | `DAGProcessor` + `MergeQueue` — dependency-aware batch processing with merge queue |
 | `loop.py` | `IterationLoop` — multi-iteration and PRD batch modes |
 | `orchestrator.py` | `Orchestrator` — cross-repo coordination with dependency ordering |
 | `context.py` | Auto-discovers and loads project context files (AGENTS.md, CLAUDE.md, etc.) |

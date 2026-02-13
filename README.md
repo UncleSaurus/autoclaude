@@ -126,6 +126,34 @@ PRD format:
 
 Stories are marked `"done": true` automatically on completion.
 
+## DAG Mode (Dependency-Aware Batch)
+
+Process multiple tickets with dependency ordering, parallel execution, and automatic merge queue:
+
+```bash
+autoclaude dag \
+  --tickets 197,198,199,200,201,202 \
+  --deps "197:200,198:197" \
+  --repo owner/repo --max-parallel 3
+```
+
+This parses the dependency spec into a DAG and computes execution waves:
+- **Wave 1:** 199, 200, 201, 202 (independent — run in parallel)
+- **Wave 2:** 197 (depends on 200)
+- **Wave 3:** 198 (depends on 197)
+
+Each wave processes tickets in parallel using isolated git worktrees. After a wave completes, branches are merged into main and the remote is refreshed before the next wave starts.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tickets` | required | Comma-separated ticket numbers |
+| `--deps` | none | Dependency spec: `"A:B,C:A"` means A depends on B, C on A |
+| `--max-parallel` | 4 | Max concurrent tickets per wave |
+| `--no-pr` | off | Skip PR creation (merge locally only) |
+| `--test-command` | none | Shell command to run as post-merge validation |
+
+File overlaps between parallel branches in the same wave are detected and reported as warnings before merging. If a ticket fails, all downstream dependents are automatically skipped.
+
 ## Multi-Repo Orchestration
 
 Process issues across related repositories:
@@ -195,11 +223,12 @@ The agent communicates back via structured output:
 ## CLI Reference
 
 ```
-autoclaude claim     # Claim and process issues (primary command)
-autoclaude process   # Process assigned issues (legacy)
-autoclaude batch     # PRD batch processing
+autoclaude claim        # Claim and process issues (primary command)
+autoclaude dag          # Dependency-aware batch with merge queue
+autoclaude batch        # PRD batch processing
 autoclaude orchestrate  # Multi-repo upstream/downstream
-autoclaude multi     # Custom multi-repo orchestration
+autoclaude multi        # Custom multi-repo orchestration
+autoclaude process      # Process assigned issues (legacy)
 ```
 
 Common flags (all commands):
@@ -215,6 +244,9 @@ Common flags (all commands):
 | `--verbose` | off | Stream agent actions to stderr |
 | `--quality-check` | none | Shell command quality gate (repeatable) |
 | `--max-quality-retries` | 2 | Retry limit for quality fix attempts |
+| `--no-pr` | off | Skip PR creation |
+| `--remote` | `origin` | Git remote for fetch/push |
+| `--base-branch` | `main` | Base branch name |
 | `--use-api-key` | off | Use ANTHROPIC_API_KEY for billing (default: OAuth) |
 | `--skip-clarification` | off | Skip issue analysis/clarification phase |
 | `--cli-path` | auto-detect | Path to claude CLI binary |

@@ -1,6 +1,8 @@
 """Configuration for AutoClaude."""
 
 import os
+import re
+import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -52,6 +54,7 @@ class AutoClaudeConfig:
     dry_run: bool = False
     post_plan_comment: bool = True
     create_draft_pr: bool = False
+    skip_pr: bool = False  # --no-pr: skip PR creation
     skip_clarification: bool = False
     clarification_timeout: int = 86400
 
@@ -81,6 +84,10 @@ class AutoClaudeConfig:
     quality_checks: list[str] = field(default_factory=list)  # CLI-specified check commands
     max_quality_retries: int = 2  # Max attempts to fix quality failures
 
+    # DAG settings
+    max_parallel: int = 4  # Max parallel tickets per wave
+    test_command: Optional[str] = None  # Post-merge validation command
+
     # Output settings
     verbose: bool = False  # Stream agent actions to terminal in real-time
 
@@ -108,6 +115,33 @@ class AutoClaudeConfig:
         # ANTHROPIC_API_KEY is optional — Claude Agent SDK can use Claude Code's OAuth auth
 
         return errors
+
+    @staticmethod
+    def detect_repo_from_remote(remote: str = "origin", cwd: str | None = None) -> str:
+        """Auto-detect owner/repo from git remote URL.
+
+        Handles SSH and HTTPS formats:
+          git@github.com:owner/repo.git -> owner/repo
+          https://github.com/owner/repo.git -> owner/repo
+          https://dev.azure.com/org/project/_git/repo -> repo
+        """
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", remote],
+                capture_output=True, text=True, check=True, cwd=cwd, timeout=5,
+            )
+            url = result.stdout.strip()
+            # SSH: git@github.com:owner/repo.git
+            ssh_match = re.match(r"git@[^:]+:(.+?)(?:\.git)?$", url)
+            if ssh_match:
+                return ssh_match.group(1)
+            # HTTPS: https://github.com/owner/repo.git
+            https_match = re.match(r"https?://[^/]+/(.+?)(?:\.git)?$", url)
+            if https_match:
+                return https_match.group(1)
+        except Exception:
+            pass
+        return ""
 
     @property
     def repo_owner(self) -> str:

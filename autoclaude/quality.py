@@ -89,11 +89,11 @@ def run_checks(
 
     for check in checks:
         if dry_run:
-            print(f"  [DRY RUN] Would run quality check: {check.name}: {check.command}")
+            print(f"  [DRY RUN] Would run quality check: {check.name}: {check.command}", flush=True)
             results.append({"name": check.name, "passed": True, "exit_code": 0, "output": ""})
             continue
 
-        print(f"  Running quality check: {check.name}...")
+        print(f"  Running quality check: {check.name}...", flush=True)
 
         try:
             proc = subprocess.run(
@@ -109,9 +109,9 @@ def run_checks(
             output = proc.stdout + proc.stderr
 
             if passed:
-                print(f"    PASS: {check.name}")
+                print(f"    PASS: {check.name}", flush=True)
             else:
-                print(f"    FAIL: {check.name} (exit code {proc.returncode})")
+                print(f"    FAIL: {check.name} (exit code {proc.returncode})", flush=True)
                 all_passed = False
 
             results.append({
@@ -122,7 +122,7 @@ def run_checks(
             })
 
         except subprocess.TimeoutExpired:
-            print(f"    TIMEOUT: {check.name} (>300s)")
+            print(f"    TIMEOUT: {check.name} (>300s)", flush=True)
             all_passed = False
             results.append({
                 "name": check.name,
@@ -132,7 +132,7 @@ def run_checks(
             })
 
         except Exception as e:
-            print(f"    ERROR: {check.name}: {e}")
+            print(f"    ERROR: {check.name}: {e}", flush=True)
             all_passed = False
             results.append({
                 "name": check.name,
