@@ -209,6 +209,56 @@ To customize, edit `autoclaude/permission_guard.py`.
 7. **PR** — Opens pull request with descriptive summary
 8. **Clean up** — Removes worktree, updates labels
 
+## Best Practices
+
+### Always use `--worktree` for batch processing
+
+Without `--worktree`, autoclaude checks out branches directly in your working tree. This means:
+- Your working directory gets clobbered between issues
+- Parallel processing is impossible
+- Uncommitted changes in your checkout will conflict or be lost
+
+Use `--worktree` for all multi-issue runs. It creates isolated worktrees (e.g. `../your-repo-issue-42/`) and cleans them up after each issue.
+
+### Write well-defined tickets for autonomous processing
+
+The agent works best with explicit, unambiguous tickets. Include:
+- **Exact files to modify** (paths, not descriptions)
+- **Implementation notes** with specific approaches, not open-ended design questions
+- **Test requirements** — what tests to add or update
+- **Definition of Done** — concrete acceptance criteria
+
+Use `--skip-clarification` for tickets that are already fully specified. This skips the analysis phase where the agent might ask questions nobody is around to answer, saving a full iteration.
+
+### Run from the target repository directory
+
+AutoClaude performs git operations in the current working directory. If you invoke it from a different repo (e.g. a monorepo parent or a dependency), branches and commits will be created in the wrong repository.
+
+```bash
+# CORRECT: run from the target repo
+cd /path/to/my-app
+autoclaude claim --repo owner/my-app --issue 42 --worktree
+
+# WRONG: running from a different directory
+cd /path/to/some-other-repo
+autoclaude claim --repo owner/my-app --issue 42  # branches created in wrong repo!
+```
+
+If autoclaude is installed in a different virtualenv, use the full path to the binary:
+
+```bash
+cd /path/to/my-app
+/path/to/other-venv/bin/autoclaude claim --repo owner/my-app --issue 42 --worktree
+```
+
+### Running from within Claude Code
+
+AutoClaude can be invoked from inside a Claude Code session. The `CLAUDECODE` environment variable (set by Claude Code 2.1+) is automatically stripped from subprocess environments so the nested CLI doesn't refuse to start.
+
+### Use `--max-iterations 2+` for complex issues
+
+The default `--max-iterations 1` gives the agent a single shot. For non-trivial work (refactoring, multi-file changes, security fixes), use `--max-iterations 2` or higher so the agent can self-correct after quality gate failures or incomplete implementations.
+
 ## Agent Signals
 
 The agent communicates back via structured output:
@@ -240,7 +290,7 @@ Common flags (all commands):
 | `--dry-run` | off | Preview without making changes |
 | `--max-turns` | 50 | Max agent turns per iteration |
 | `--max-iterations` | 1 | Iterations per issue (higher for complex work) |
-| `--worktree` | off | Isolated git worktree per issue |
+| `--worktree` | off | Isolated git worktree per issue (strongly recommended) |
 | `--verbose` | off | Stream agent actions to stderr |
 | `--quality-check` | none | Shell command quality gate (repeatable) |
 | `--max-quality-retries` | 2 | Retry limit for quality fix attempts |
